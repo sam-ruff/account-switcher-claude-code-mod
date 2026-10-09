@@ -89,10 +89,6 @@ There is one catch. `~/.claude.json` holds a single "signed in as" record that e
 
 A session remembers its account across `claude --resume`.
 
-## Previewing the sidebar
-
-`scripts/preview-designs.sh` opens Claude Code with made-up accounts and every sidebar design that was considered, in a throwaway home directory. Nothing touches your real login. `/design hats` there shows every hat.
-
 ## Development
 
 ```sh
