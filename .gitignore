@@ -1,0 +1,5 @@
+mods/*/.claude-plugin/types/
+mods/*/tsconfig.json
+previews/*/.claude-plugin/types/
+previews/*/tsconfig.json
+__pycache__/
