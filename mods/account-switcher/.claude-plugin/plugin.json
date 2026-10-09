@@ -1,0 +1,9 @@
+{
+  "name": "account-switcher",
+  "displayName": "Account switcher",
+  "version": "0.3.0",
+  "description": "Mod: run each Claude Code session on its own Claude subscription account, and switch live from a sidebar (Ctrl+Alt+Shift+numpad -) or /account-switch",
+  "author": { "name": "developer" },
+  "license": "MIT",
+  "keywords": ["mod", "accounts", "login", "subscription"]
+}

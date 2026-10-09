@@ -98,7 +98,6 @@ A session remembers its account across `claude --resume`.
 ```sh
 cd mods/account-switcher && claude plugin test       # unit tests, no session or network
 scripts/integration-test.sh [path-to-claude]         # two real sessions against a fake API
-scripts/screenshots.sh [path-to-claude]              # regenerates docs/
 ```
 
-The integration test runs two Claude Code sessions side by side on one throwaway home directory. One stays on the default account and the other switches away and back. A fake API records which token each session sent, and both sessions run `/status`. It needs Python with `pyte`, and the screenshot script also needs `Pillow` and `fonttools`.
+The integration test runs two Claude Code sessions side by side on one throwaway home directory. One stays on the default account and the other switches away and back. A fake API records which token each session sent, and both sessions run `/status`. It needs Python with `pyte`.

@@ -1,0 +1,4 @@
+{
+  "description": "Account switcher hooks module",
+  "modules": ["./register.ts"]
+}
