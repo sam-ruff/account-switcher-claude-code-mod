@@ -55,6 +55,7 @@ let switching = false
 let budgetFailure = false
 let usage: UsageCache | undefined
 let usageTimer: Timer | undefined
+let continuationTimer: Timer | undefined
 let listOffset = 0
 let panelWidth = PANE_COLUMNS
 let panelHeight = 30
@@ -80,6 +81,7 @@ async function setAutoSwitch($: EngineInterface, enabled: boolean): Promise<stri
 async function switchAfterLimit($: EngineInterface): Promise<void> {
   if (!autoSwitch || switching) return
   switching = true
+  let continuationScheduled = false
   try {
     const s = await refresh($)
     if (!current) return
@@ -95,13 +97,23 @@ async function switchAfterLimit($: EngineInterface): Promise<void> {
     }
     await useAccount($, s, target)
     $.ui.log(`Budget exhausted. Switched this session to ${displayName(target)}.`)
-    await $.clock.sleep(CONFIG_SETTLE_MS)
-    const continuation = await $.prompt.submit({ text: 'Continue the previous task from where it stopped because the account budget was exhausted.' })
-    if (continuation.drop) $.ui.log(`Auto-switch could not continue: ${continuation.drop}`)
+    continuationScheduled = true
+    continuationTimer = $.clock.every(CONFIG_SETTLE_MS, async () => {
+      continuationTimer?.cancel()
+      continuationTimer = undefined
+      try {
+        const continuation = await $.prompt.submit({ text: 'Continue the previous task from where it stopped because the account budget was exhausted.' })
+        if (continuation.drop) $.ui.log(`Auto-switch could not continue: ${continuation.drop}`)
+      } catch (error) {
+        $.ui.log(`Auto-switch could not continue: ${error instanceof Error ? error.message : String(error)}`)
+      } finally {
+        switching = false
+      }
+    })
   } catch (error) {
     $.ui.log(`Auto-switch failed: ${error instanceof Error ? error.message : String(error)}`)
   } finally {
-    switching = false
+    if (!continuationScheduled) switching = false
   }
 }
 
@@ -415,7 +427,12 @@ export const register: Register = on => {
   })
 
   on('prompt.submit', async ($, e, next) => {
-    if (['composer', 'bridge', 'sdk'].includes(e.origin.kind)) exhausted.clear()
+    if (['composer', 'bridge', 'sdk'].includes(e.origin.kind)) {
+      continuationTimer?.cancel()
+      continuationTimer = undefined
+      switching = false
+      exhausted.clear()
+    }
     return next(e)
   })
 

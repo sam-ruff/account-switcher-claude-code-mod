@@ -113,8 +113,8 @@ function failures(on: On, rejectPrompt = false) {
 async function failTurn($: Parameters<Parameters<typeof test>[1]>[0], clock: ReturnType<typeof mock.clock>, error: 'rate_limit' | 'billing_error' | 'overloaded' | 'server_error' | 'authentication_failed' | 'invalid_request' = 'rate_limit') {
   await $.classic.StopFailure({ error })
   const completed = $.turn.complete({ turnId: 'turn-1', answer: '', durationMs: 0, isAborted: false, reason: 'error' })
-  await clock.advance(2000)
   await completed
+  await clock.advance(2000)
 }
 
 test('auto-switch starts off and leaves budget failures alone', async ($, on) => {
