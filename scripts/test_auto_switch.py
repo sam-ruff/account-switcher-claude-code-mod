@@ -43,9 +43,27 @@ def test_budget_failover(tmp_path, enabled, all_exhausted, ledger_width):
                     "five_hour": {"utilization": 36 if token == "token-bob" else 100 if token == "token-carol" else 8, "resets_at": "2099-10-11T15:30:00Z"},
                     "seven_day": {"utilization": 72, "resets_at": "2099-10-14T08:00:00Z"},
                 }
-            body = json.dumps(payload).encode()
+            streaming = is_message and not exhausted and "text/event-stream" in self.headers.get("accept", "")
+            if streaming:
+                events = [
+                    ("message_start", {"type": "message_start", "message": {
+                        "id": "msg_test", "type": "message", "role": "assistant", "model": "claude-test",
+                        "content": [], "stop_reason": None, "stop_sequence": None,
+                        "usage": {"input_tokens": 1, "output_tokens": 1},
+                    }}),
+                    ("content_block_start", {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}),
+                    ("content_block_delta", {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "Task continued successfully."}}),
+                    ("content_block_stop", {"type": "content_block_stop", "index": 0}),
+                    ("message_delta", {"type": "message_delta", "delta": {"stop_reason": "end_turn", "stop_sequence": None}, "usage": {"output_tokens": 1}}),
+                    ("message_stop", {"type": "message_stop"}),
+                ]
+                body = "".join(f"event: {name}\ndata: {json.dumps(event)}\n\n" for name, event in events).encode()
+                content_type = "text/event-stream"
+            else:
+                body = json.dumps(payload).encode()
+                content_type = "application/json"
             self.send_response(429 if exhausted else 200)
-            self.send_header("content-type", "application/json")
+            self.send_header("content-type", content_type)
             self.send_header("content-length", str(len(body)))
             self.send_header("x-should-retry", "false")
             if exhausted:
