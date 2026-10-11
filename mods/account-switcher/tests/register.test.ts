@@ -110,16 +110,18 @@ function failures(on: On, rejectPrompt = false) {
   return prompts
 }
 
-async function failTurn($: Parameters<Parameters<typeof test>[1]>[0], error: 'rate_limit' | 'billing_error' | 'overloaded' | 'server_error' | 'authentication_failed' | 'invalid_request' = 'rate_limit') {
+async function failTurn($: Parameters<Parameters<typeof test>[1]>[0], clock: ReturnType<typeof mock.clock>, error: 'rate_limit' | 'billing_error' | 'overloaded' | 'server_error' | 'authentication_failed' | 'invalid_request' = 'rate_limit') {
   await $.classic.StopFailure({ error })
-  await $.turn.complete({ turnId: 'turn-1', answer: '', durationMs: 0, isAborted: false, reason: 'error' })
+  const completed = $.turn.complete({ turnId: 'turn-1', answer: '', durationMs: 0, isAborted: false, reason: 'error' })
+  await clock.advance(2000)
+  await completed
 }
 
 test('auto-switch starts off and leaves budget failures alone', async ($, on) => {
-  const { env } = stub(on, machine())
+  const { env, clock } = stub(on, machine())
   const prompts = failures(on)
   await $.session.start(headless)
-  await failTurn($)
+  await failTurn($, clock)
   expect(env.has('CLAUDE_SECURESTORAGE_CONFIG_DIR')).toBe(false)
   expect(prompts).toEqual([])
 })
@@ -133,12 +135,12 @@ test('auto-switch tries every account once and stops when all are exhausted', as
   const prompts = failures(on)
   await $.session.start(headless)
   await $.command.run({ command: 'account-switch', args: 'auto on' })
-  await failTurn($)
+  await failTurn($, clock)
   expect(env.get('CLAUDE_SECURESTORAGE_CONFIG_DIR')).toBe(carol)
-  await failTurn($, 'billing_error')
+  await failTurn($, clock, 'billing_error')
   expect(env.get('CLAUDE_SECURESTORAGE_CONFIG_DIR')).toBe(WORK)
-  await failTurn($)
-  await failTurn($)
+  await failTurn($, clock)
+  await failTurn($, clock)
   await clock.settle()
   expect(logs.filter(line => line.includes('could not continue'))).toEqual([])
   expect(prompts.length).toBe(2)
@@ -147,13 +149,13 @@ test('auto-switch tries every account once and stops when all are exhausted', as
 })
 
 test('auto-switch restores its setting and wraps from the last account to the default', async ($, on) => {
-  const { env } = stub(on, machine(), {
+  const { env, clock } = stub(on, machine(), {
     env: { CLAUDE_SECURESTORAGE_CONFIG_DIR: WORK },
     store: new Map([['auto-switch', true]]),
   })
   const prompts = failures(on)
   await $.session.start(headless)
-  await failTurn($)
+  await failTurn($, clock)
   expect(env.has('CLAUDE_SECURESTORAGE_CONFIG_DIR')).toBe(false)
   expect(prompts.length).toBe(1)
 })
@@ -161,25 +163,25 @@ test('auto-switch restores its setting and wraps from the last account to the de
 test('auto-switch skips accounts needing login and ignores unrelated errors', async ($, on) => {
   const files = machine()
   files.delete(`${WORK}/.credentials.json`)
-  const { env } = stub(on, files, { store: new Map([['auto-switch', true]]) })
+  const { env, clock } = stub(on, files, { store: new Map([['auto-switch', true]]) })
   const prompts = failures(on)
   await $.session.start(headless)
   for (const error of ['overloaded', 'server_error', 'authentication_failed', 'invalid_request', 'rate_limit'] as const) {
-    await failTurn($, error)
+    await failTurn($, clock, error)
   }
   expect(env.has('CLAUDE_SECURESTORAGE_CONFIG_DIR')).toBe(false)
   expect(prompts).toEqual([])
 })
 
 test('temporary server limits and subagent failures do not switch accounts', async ($, on) => {
-  const { env } = stub(on, machine(), { store: new Map([['auto-switch', true]]) })
+  const { env, clock } = stub(on, machine(), { store: new Map([['auto-switch', true]]) })
   const prompts = failures(on)
   await $.session.start(headless)
   await $.classic.StopFailure({ error: 'rate_limit', last_assistant_message: 'Server is temporarily limiting requests (not your usage limit)' })
   await $.turn.complete({ turnId: 'turn-1', answer: '', durationMs: 0, isAborted: false, reason: 'error' })
   await $.classic.StopFailure({ error: 'rate_limit', agent_id: 'worker-1' })
   await $.turn.complete({ turnId: 'turn-2', answer: '', durationMs: 0, isAborted: false, reason: 'error' })
-  for (const error of ['overloaded', 'server_error', 'authentication_failed', 'invalid_request'] as const) await failTurn($, error)
+  for (const error of ['overloaded', 'server_error', 'authentication_failed', 'invalid_request'] as const) await failTurn($, clock, error)
   expect(env.has('CLAUDE_SECURESTORAGE_CONFIG_DIR')).toBe(false)
   expect(prompts).toEqual([])
 })
@@ -195,23 +197,23 @@ test('an interrupted turn does not continue automatically', async ($, on) => {
 })
 
 test('a rejected continuation is reported without trying another account', async ($, on) => {
-  const { env, logs } = stub(on, machine(), { store: new Map([['auto-switch', true]]) })
+  const { env, logs, clock } = stub(on, machine(), { store: new Map([['auto-switch', true]]) })
   failures(on, true)
   await $.session.start(headless)
-  await failTurn($)
+  await failTurn($, clock)
   expect(env.get('CLAUDE_SECURESTORAGE_CONFIG_DIR')).toBe(WORK)
   expect(logs.some(line => line.includes('prompt queue unavailable'))).toBe(true)
 })
 
 test('turning auto-switch off prevents further continuations', async ($, on) => {
-  const { env, store } = stub(on, machine())
+  const { env, store, clock } = stub(on, machine())
   const prompts = failures(on)
   await $.session.start(headless)
   await $.command.run({ command: 'account-switch', args: 'auto on' })
   expect(store.get('auto-switch')).toBe(true)
-  await failTurn($)
+  await failTurn($, clock)
   await $.command.run({ command: 'account-switch', args: 'auto off' })
-  await failTurn($)
+  await failTurn($, clock)
   expect(store.get('auto-switch')).toBe(false)
   expect(env.get('CLAUDE_SECURESTORAGE_CONFIG_DIR')).toBe(WORK)
   expect(prompts.length).toBe(1)
@@ -219,11 +221,11 @@ test('turning auto-switch off prevents further continuations', async ($, on) => 
 
 test('a failed account switch reports the error and does not queue a continuation', async ($, on) => {
   const files = machine()
-  const { logs } = stub(on, files, { store: new Map([['auto-switch', true]]) })
+  const { logs, clock } = stub(on, files, { store: new Map([['auto-switch', true]]) })
   const prompts = failures(on)
   await $.session.start(headless)
   files.set(CONFIG, '{broken')
-  await failTurn($)
+  await failTurn($, clock)
   expect(prompts).toEqual([])
   expect(logs.some(line => line.startsWith('Auto-switch failed:'))).toBe(true)
 })
