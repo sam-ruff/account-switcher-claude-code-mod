@@ -95,6 +95,7 @@ async function switchAfterLimit($: EngineInterface): Promise<void> {
     }
     await useAccount($, s, target)
     $.ui.log(`Budget exhausted. Switched this session to ${displayName(target)}.`)
+    await $.clock.sleep(CONFIG_SETTLE_MS)
     const continuation = await $.prompt.submit({ text: 'Continue the previous task from where it stopped because the account budget was exhausted.' })
     if (continuation.drop) $.ui.log(`Auto-switch could not continue: ${continuation.drop}`)
   } catch (error) {
