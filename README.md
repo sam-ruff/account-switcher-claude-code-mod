@@ -4,7 +4,7 @@ A Claude Code mod for people with more than one Claude subscription. Each sessio
 
 ![Opening the account sidebar, changing Clawd's hat, switching to Alice and showing the logout confirmation](docs/demo.gif)
 
-It needs Claude Code 2.1.287 or later, the first release that loads mods. It has been tested on Linux with 2.1.295. The macOS and Windows code paths have unit tests but have not been run on either system.
+It needs Claude Code 2.1.287 or later, the first release that loads mods. It has been tested on Linux with 2.1.296. The macOS and Windows code paths have unit tests but have not been run on either system.
 
 ## Quick start
 

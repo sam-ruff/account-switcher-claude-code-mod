@@ -11,7 +11,7 @@
     "release": "semantic-release"
   },
   "devDependencies": {
-    "@anthropic-ai/claude-code": "2.1.295",
+    "@anthropic-ai/claude-code": "2.1.296",
     "@semantic-release/changelog": "7.0.0",
     "@semantic-release/commit-analyzer": "13.0.1",
     "@semantic-release/git": "11.0.1",
