@@ -8,6 +8,8 @@ Each step is one of:
   ["wait", seconds]         let the screen settle
   ["screen", label]         print the screen with row numbers
   ["png", [path, top, bottom, left?, right?]]   save part of the screen as a PNG (needs pyte and Pillow)
+  ["frame", [top, bottom, left?, right?]]      capture a demo frame
+  ["gif", path]                              save captured demo frames
 
 Set DRIVE_BASE_URL to point the session at a fake API, and DRIVE_TAG to mark its requests.
 """
@@ -51,6 +53,8 @@ stream = pyte.ByteStream(screen)
 env = {k: v for k, v in os.environ.items() if not k.startswith(("ANTHROPIC_", "CLAUDE_CODE_", "CLAUDECODE", "CLAUDE_CONFIG_DIR", "CLAUDE_SECURESTORAGE", "DRIVE_"))}
 env.update(HOME=home, TERM="xterm-256color", COLUMNS=str(cols), LINES=str(rows),
            CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1", DISABLE_AUTOUPDATER="1")
+env.pop("NO_COLOR", None)
+env.update(FORCE_COLOR="3", COLORTERM="truecolor")
 if os.environ.get("DRIVE_BASE_URL"):
     env["ANTHROPIC_BASE_URL"] = os.environ["DRIVE_BASE_URL"]
 if os.environ.get("DRIVE_TAG"):
@@ -164,10 +168,13 @@ def render_png(path, crop):
                 img.paste(glyph, (px + (2 * cw - size) // 2, py + 2), glyph)
                 continue
             draw.text((px, py + 2), cell.data, font=font_for(cell.data[0], cell.bold), fill=fg)
-    img.save(path)
+    if path:
+        img.save(path)
+    return img
 
 
 pump(6)
+frames = []
 for kind, arg in json.loads(steps):
     if kind == "type":
         for character in arg:
@@ -189,6 +196,13 @@ for kind, arg in json.loads(steps):
         continue
     elif kind == "png":
         render_png(arg[0], arg[1:])
+        continue
+    elif kind == "frame":
+        frames.append(render_png(None, arg))
+        continue
+    elif kind == "gif":
+        if frames:
+            frames[0].save(arg, save_all=True, append_images=frames[1:], duration=1800, loop=0)
         continue
     pump(0.6)
 

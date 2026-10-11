@@ -33,6 +33,20 @@ test('resolvePaths follows Claude Code config locations', async () => {
   expect(resolvePaths('/h', undefined, true).globalConfig).toBe('/h/.claude/.config.json')
 })
 
+test('usage tokens come from the account credential store and expired tokens are not returned', async () => {
+  const { io, s } = await ready()
+  const [home, work] = await s.list()
+  if (!home || !work) throw new Error('Expected both fixture accounts')
+  expect(await s.usageToken(home, io.clock)).toBe('at-rt-b')
+  expect(await s.usageToken(work, io.clock)).toBe('at-rt-a')
+  io.files.set(HOME_CREDS, creds('expired', { expiresAt: io.clock }))
+  expect(await s.usageToken(home, io.clock)).toBeUndefined()
+  io.files.set(HOME_CREDS, creds('invalid', { accessToken: 12 }))
+  expect(await s.usageToken(home, io.clock)).toBeUndefined()
+  const injected = storeFor(io, { read: async () => ({ claudeAiOauth: { accessToken: 'keychain-token' } }), write: async () => {}, remove: async () => {} })
+  expect(await injected.usageToken(work, io.clock)).toBe('keychain-token')
+})
+
 test('resolvePaths uses backslashes on Windows', async () => {
   const paths = resolvePaths('C:\\Users\\sam', undefined, false, joiner('windows'))
   expect([paths.configDir, paths.globalConfig, paths.accountsDir]).toEqual([

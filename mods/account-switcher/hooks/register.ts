@@ -1,4 +1,4 @@
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, Register, Timer } from 'claude-code'
 import {
   type Account,
   AccountStore,
@@ -20,8 +20,9 @@ import {
 } from './accounts.ts'
 import { cycleHat, HATS } from './clawd.ts'
 import { detectStore, KeychainCredentials } from './keychain.ts'
-import { panel, panelRows, useKey } from './panel.ts'
+import { nextPanelFocus, orderedAccounts, panel, panelGeometry, panelRows, useKey } from './panel.ts'
 import { type Commands, commandsFor, detectPlatform, homeDir, joiner, type Platform } from './platform.ts'
+import { HttpUsageApi, UsageCache, USAGE_REFRESH_MS } from './usage.ts'
 
 const PANE = 'accounts'
 const PANE_COLUMNS = 52
@@ -29,12 +30,14 @@ const PANE_COLUMNS = 52
 const CONFIG_SETTLE_MS = 1500
 const SESSIONS_KEY = 'sessions'
 const KEYS_OFF_KEY = 'keys-off'
+const AUTO_SWITCH_KEY = 'auto-switch'
 
 const HELP = [
   'Usage:',
   `  /account-switch                  open the account sidebar (or press ${SWITCH_KEY_LABEL})`,
   '  /account-switch <name|number>    switch this session to a saved account',
   '  /account-switch list',
+  '  /account-switch auto on|off      switch accounts when the budget runs out',
   '  /account-switch add              sign in to another account (same as /login)',
   '  /account-switch rename <name> <label>',
   `  /account-switch hat <name> <hat> one of: ${HATS.map(h => h.id).join(', ')}`,
@@ -46,6 +49,60 @@ let accounts: Account[] = []
 let current: Account | undefined
 let focused = ''
 let notice = ''
+let autoSwitch = false
+const exhausted = new Set<string>()
+let switching = false
+let budgetFailure = false
+let usage: UsageCache | undefined
+let usageTimer: Timer | undefined
+let listOffset = 0
+let panelWidth = PANE_COLUMNS
+let panelHeight = 30
+
+async function refreshUsage($: EngineInterface, force = false): Promise<void> {
+  const s = await refresh($)
+  usage ??= new UsageCache(new HttpUsageApi((url, init) => $.http.fetch(url, init), (await $.env.get('ANTHROPIC_BASE_URL')) || undefined), () => $.clock.now())
+  const cache = usage
+  await Promise.all(accounts.map(async account => {
+    await cache.refresh(account, async () => s.usageToken(account, await $.clock.now()), force)
+    $.ui.invalidate('ui.render')
+  }))
+}
+
+async function setAutoSwitch($: EngineInterface, enabled: boolean): Promise<string> {
+  await $.store.set(AUTO_SWITCH_KEY, enabled)
+  autoSwitch = enabled
+  exhausted.clear()
+  $.ui.invalidate('ui.render')
+  return `Auto-switch is ${enabled ? 'on' : 'off'}.`
+}
+
+async function switchAfterLimit($: EngineInterface): Promise<void> {
+  if (!autoSwitch || switching) return
+  switching = true
+  try {
+    const s = await refresh($)
+    if (!current) return
+    exhausted.add(current.dir)
+    const index = accounts.findIndex(a => a.dir === current?.dir)
+    const ordered = [...accounts.slice(index + 1), ...accounts.slice(0, index)]
+    const target = ordered.find(a => !a.needsLogin && !exhausted.has(a.dir))
+    if (!target) {
+      notice = 'Auto-switch stopped: all available accounts are out of budget. Try again when a budget resets.'
+      $.ui.log(notice)
+      $.ui.invalidate('ui.render')
+      return
+    }
+    await useAccount($, s, target)
+    $.ui.log(`Budget exhausted. Switched this session to ${displayName(target)}.`)
+    const continuation = await $.prompt.submit({ text: 'Continue the previous task from where it stopped because the account budget was exhausted.' })
+    if (continuation.drop) $.ui.log(`Auto-switch could not continue: ${continuation.drop}`)
+  } catch (error) {
+    $.ui.log(`Auto-switch failed: ${error instanceof Error ? error.message : String(error)}`)
+  } finally {
+    switching = false
+  }
+}
 
 interface Env {
   platform: Platform
@@ -224,6 +281,7 @@ async function switchTo($: EngineInterface, query: string): Promise<string> {
   if (match.kind === 'ambiguous') return `"${query}" matches more than one account: ${match.candidates.map(displayName).join(', ')}`
   if (match.account.dir === current?.dir) return `This session already uses ${displayName(match.account)}.`
   await useAccount($, s, match.account)
+  exhausted.clear()
   const warning = match.account.needsLogin ? ' Its login has expired, so run /login to sign in to it again.' : ''
   return `This session now uses ${displayName(match.account)}. Other sessions keep their own account.${warning}`
 }
@@ -248,6 +306,9 @@ async function runCommand($: EngineInterface, args: string): Promise<string | nu
     case 'list':
     case 'ls':
       return formatList(accounts, current)
+    case 'auto':
+      if (rest.length !== 1 || (rest[0] !== 'on' && rest[0] !== 'off')) return 'Usage: /account-switch auto on|off'
+      return setAutoSwitch($, rest[0] === 'on')
     case 'add':
     case 'login':
       return 'Run /login and sign in. The new account is added and this session switches to it.'
@@ -298,14 +359,43 @@ async function togglePane($: EngineInterface): Promise<void> {
     return
   }
   notice = ''
+  listOffset = 0
   await refresh($)
   focused = current ? useKey(current) : ''
   await $.ui.open({ id: PANE, title: 'Accounts', focus: true, closeOnEscape: true, columns: PANE_COLUMNS, rows: panelRows({ accounts, current }) })
+  await refreshUsage($)
+  usageTimer?.cancel()
+  usageTimer = $.clock.every(USAGE_REFRESH_MS, async () => {
+    if (!(await $.ui.panes()).some(p => p.id === PANE)) {
+      usageTimer?.cancel()
+      usageTimer = undefined
+      return
+    }
+    await refreshUsage($, true)
+  })
 }
 
 export const register: Register = on => {
+  on('ui.close', { id: PANE }, async ($, e, next) => {
+    const result = await next(e)
+    usageTimer?.cancel()
+    usageTimer = undefined
+    return result
+  })
+
+  on('session.end', async ($, e, next) => {
+    usageTimer?.cancel()
+    usageTimer = undefined
+    return next(e)
+  })
+
   on('session.start', async ($, e, next) => {
     try {
+      autoSwitch = (await $.store.get(AUTO_SWITCH_KEY)) === true
+      exhausted.clear()
+      usage = undefined
+      usageTimer?.cancel()
+      usageTimer = undefined
       const s = await store($)
       await s.learnHome()
       await restoreSession($, s)
@@ -317,10 +407,33 @@ export const register: Register = on => {
     await $.command.register({
       name: 'account-switch',
       description: 'Switch this session between Claude subscription accounts',
-      argumentHint: '[name|list|add|rename|hat|forget|keys]',
+      argumentHint: '[name|list|add|rename|hat|forget|keys|auto]',
       immediate: true,
     })
     return next(e)
+  })
+
+  on('prompt.submit', async ($, e, next) => {
+    if (['composer', 'bridge', 'sdk'].includes(e.origin.kind)) exhausted.clear()
+    return next(e)
+  })
+
+  on('classic.StopFailure', async ($, e, next) => {
+    const result = await next(e)
+    const temporaryLimit = /not your usage limit/i.test(e.last_assistant_message ?? '')
+    if (!e.agent_id && !temporaryLimit && !result.preventContinuation && !result.block && (e.error === 'rate_limit' || e.error === 'billing_error')) {
+      budgetFailure = true
+    }
+    return result
+  })
+
+  on('turn.complete', async ($, e, next) => {
+    const result = await next(e)
+    if (e.agentId) return result
+    const shouldSwitch = budgetFailure && e.reason === 'error' && !e.isAborted
+    budgetFailure = false
+    if (shouldSwitch) await switchAfterLimit($)
+    return result
   })
 
   on('command.run', { command: 'account-switch' }, async ($, e) => {
@@ -390,8 +503,15 @@ export const register: Register = on => {
 
   on('ui.focus', { requestId: PANE }, async ($, e, next) => {
     const result = await next(e)
-    if (!result.deny && e.element) {
+    if (!result.deny && e.element && focused !== e.element) {
       focused = e.element
+      const index = orderedAccounts({ accounts, current }).findIndex(a => useKey(a) === focused)
+      if (index >= 0) {
+        const geometry = panelGeometry(panelWidth, panelHeight, accounts.length, listOffset)
+        const top = index * geometry.rowHeight
+        if (top < listOffset) listOffset = top
+        else if (top + geometry.rowHeight > listOffset + geometry.listHeight) listOffset = Math.min(top, top + geometry.rowHeight - geometry.listHeight)
+      }
       $.ui.invalidate('ui.render')
     }
     return result
@@ -401,9 +521,23 @@ export const register: Register = on => {
   on('ui.scroll', { requestId: PANE }, async ($, e, next) => {
     const account = accounts.find(a => focused === useKey(a))
     const isPageKey = e.origin.kind === 'person' && !e.pointer && Math.abs(e.by) >= e.bodyRows
-    if (!account || !isPageKey) return next(e)
-    await setHat($, account, cycleHat(account.hat, e.by > 0 ? 1 : -1).id)
-    return { deny: 'changed the hat instead' }
+    if (account && isPageKey) {
+      await setHat($, account, cycleHat(account.hat, e.by > 0 ? 1 : -1).id)
+      return { deny: 'changed the hat instead' }
+    }
+    if (e.origin.kind === 'person' && !e.pointer && Math.abs(e.by) === 1) {
+      const keys = [...orderedAccounts({ accounts, current }).map(useKey), 'auto-switch', 'add', 'refresh-usage']
+      const target = nextPanelFocus(keys, focused, e.by)
+      if (target && target !== focused) await $.ui.focus({ requestId: PANE, key: target })
+      return { deny: 'moved the panel selection' }
+    }
+    if (e.origin.kind !== 'person') return { deny: 'keep the panel footer fixed' }
+    const geometry = panelGeometry(panelWidth, panelHeight, accounts.length, listOffset)
+    if (!e.pointer || (e.pointer.row >= 2 && e.pointer.row < 2 + geometry.listHeight)) {
+      listOffset = panelGeometry(panelWidth, panelHeight, accounts.length, listOffset + e.by).offset
+      $.ui.invalidate('ui.render')
+    }
+    return { deny: 'scroll accounts inside the fixed panel' }
   }).catch(async ($, e, next) => next(e))
 
   // The account line above the prompt. Clicking it, or the shortcut, opens the sidebar.
@@ -425,11 +559,19 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     if (e.requestId !== PANE) return next(e)
+    panelWidth = e.props.bodyColumns
+    panelHeight = e.props.scroll.bodyRows
+    listOffset = panelGeometry(panelWidth, panelHeight, accounts.length, listOffset).offset
     const { Box, Text, Button } = $.ui.resolve(e)
     return panel(
       { Box, Text, Button },
-      { accounts, current, focused, notice, width: e.props.bodyColumns },
+      { accounts, current, focused, notice, autoSwitch, width: panelWidth, height: panelHeight, offset: listOffset, usage: usage?.entries ?? new Map(), now: await $.clock.now() },
       {
+        refreshUsage: () => refreshUsage($, true),
+        toggleAutoSwitch: async () => {
+          notice = await setAutoSwitch($, !autoSwitch)
+          $.ui.invalidate('ui.render')
+        },
         choose: account => async () => {
           notice = await switchTo($, account.isHome ? 'home' : account.key).catch(
             error => `Account switch failed: ${error instanceof Error ? error.message : String(error)}`,

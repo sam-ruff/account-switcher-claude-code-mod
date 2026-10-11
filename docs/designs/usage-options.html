@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Account switcher · Usage and resets</title>
+<style>
+  :root { color-scheme:dark; --bg:#17191c; --pane:#242628; --line:#3a3d3d; --text:#e5e2db; --muted:#a09f98; --faint:#777e7d; --green:#aac4a2; --amber:#d8b378; --red:#d48f82; --accent:#d59b83; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 'DejaVu Sans',sans-serif; }
+  main { max-width:1740px; margin:auto; padding:46px 40px 38px; }
+  header { display:flex; align-items:end; justify-content:space-between; margin-bottom:38px; }
+  .eyebrow { font:11px/1.5 ui-monospace,monospace; color:var(--accent); letter-spacing:2px; text-transform:uppercase; }
+  h1 { font-size:32px; font-weight:550; letter-spacing:-1px; margin:8px 0 6px; }
+  header p { color:var(--muted); margin:0; }
+  .sample { text-align:right; font-size:12px; color:var(--muted); }
+  .grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:28px; }
+  h2 { font-size:20px; font-weight:550; letter-spacing:-.4px; margin:0; }
+  .heading { display:flex; align-items:center; gap:12px; margin-bottom:6px; }
+  .badge { font-size:10px; text-transform:uppercase; letter-spacing:1px; color:var(--green); border:1px solid #52644e; padding:2px 7px; }
+  .caption { color:var(--muted); font-size:13px; min-height:44px; margin:0 0 18px; }
+  .terminal { font:14px/1.55 'DejaVu Sans Mono','Liberation Mono',monospace; background:var(--pane); border:1px solid var(--line); min-height:1000px; display:flex; flex-direction:column; box-shadow:0 18px 40px #0002; }
+  .chrome { display:flex; justify-content:space-between; border-bottom:1px solid var(--line); color:var(--muted); padding:13px 20px; font-size:12px; }
+  .content { padding:24px 22px 18px; flex:1; }
+  .section { color:var(--faint); letter-spacing:1.8px; font-size:11px; margin-bottom:13px; }
+  .section.spaced { margin-top:25px; }
+  .account { padding:17px 17px 15px; border:1px solid var(--line); margin-bottom:14px; }
+  .account.active { border-color:#75896d; background:#2b302c; }
+  .account-head { display:flex; justify-content:space-between; gap:10px; align-items:start; min-height:67px; }
+  .name { font-weight:bold; font-size:15px; }
+  .sub { color:var(--muted); font-size:11px; margin-top:3px; }
+  .state { font-size:11px; font-weight:normal; margin-left:9px; color:var(--green); white-space:nowrap; }
+  .clawd { color:#d58f8e; font:bold 10px/10px 'DejaVu Sans Mono',monospace; white-space:pre; margin:0; flex-shrink:0; }
+  .clawd .hat { color:var(--amber); }
+  .clawd .top { color:#adb4b1; }
+  .clawd .cap { color:#a2aec4; }
+  .quota { margin-top:11px; }
+  .qline { display:flex; justify-content:space-between; align-items:center; font-size:12px; }
+  .qline .label { color:#c0c0b8; }
+  .good { color:var(--green); } .warn { color:var(--amber); } .stop { color:var(--red); }
+  .bar { color:#515650; font-size:12px; letter-spacing:1.1px; margin:3px 0; white-space:nowrap; }
+  .reset { color:var(--muted); font-size:11px; display:flex; align-items:center; gap:7px; }
+  .reset svg { width:12px; height:12px; flex:none; stroke:currentColor; fill:none; stroke-width:1.4; }
+  .muted { color:var(--muted); }
+  .row { display:flex; justify-content:space-between; align-items:center; gap:12px; }
+  .auto { margin-top:22px; border-top:1px solid var(--line); padding-top:18px; }
+  button { cursor:pointer; font:inherit; color:inherit; }
+  .switch { color:var(--muted); font-size:12px; border:0; background:none; }
+  .switch:focus-visible { outline:1px solid var(--accent); outline-offset:4px; }
+  .switch:hover { color:var(--text); }
+  .hint { color:var(--faint); font-size:11px; margin-top:6px; }
+  .add { color:#a9bed0; font-size:12px; margin-top:20px; }
+  .footer { padding:13px 22px; border-top:1px solid var(--line); color:var(--faint); font-size:10px; line-height:1.8; }
+  .ledger .account { border:0; border-left:2px solid var(--line); padding:7px 0 12px 15px; margin-bottom:24px; }
+  .ledger .account.active { border-left-color:var(--green); background:transparent; }
+  .ledger .account-head { min-height:70px; padding-right:6px; }
+  .table-head { display:grid; grid-template-columns:55px 90px 1fr; color:var(--faint); font-size:10px; padding-bottom:8px; border-bottom:1px solid var(--line); }
+  .table-row { display:grid; grid-template-columns:55px 90px 1fr; align-items:center; font-size:11px; padding-top:10px; }
+  .table-row .reset { font-size:10px; gap:4px; }
+  .smallbar { letter-spacing:-1px; font-size:10px; }
+  .statusline { color:var(--faint); font-size:10px; margin-top:13px; }
+  .agenda .summary { border-bottom:1px solid var(--line); padding-bottom:18px; margin-bottom:22px; }
+  .summary .time { font-size:26px; letter-spacing:-1px; margin:4px 0; }
+  .summary .time small { font-size:12px; color:var(--muted); letter-spacing:0; }
+  .agenda .account { border:0; padding:0 0 22px; border-bottom:1px solid var(--line); margin-bottom:20px; }
+  .agenda .account.active { background:none; }
+  .agenda .account-head { min-height:67px; }
+  .timeline { border-left:1px solid #62675f; margin-left:5px; padding-left:16px; }
+  .event { position:relative; margin-top:12px; }
+  .event::before { content:' '; width:5px; height:5px; background:var(--muted); position:absolute; top:7px; left:-19px; }
+  .event .when { font-size:12px; }
+  .event .detail { color:var(--muted); font-size:10px; margin-top:2px; }
+  .note { color:var(--muted); font-size:12px; margin:16px 0 0; }
+  .legend { display:flex; gap:24px; align-items:center; justify-content:space-between; color:var(--faint); font-size:11px; margin-top:28px; }
+  .symbol { width:0; height:0; position:absolute; }
+  @media(max-width:1100px) { .grid { grid-template-columns:1fr; max-width:530px; margin:auto; } header { display:block; } .sample { text-align:left; margin-top:18px; } .caption { min-height:0; } .terminal { min-height:0; } .legend { display:block; } main { padding:28px 20px; } .content { padding:20px 14px; } }
+  @media(max-width:450px) { .account { padding:14px 10px; } .bar { letter-spacing:0; font-size:10px; } .name { font-size:13px; } .state { margin-left:5px; font-size:10px; } .sub { font-size:9px; } .reset { font-size:9px; } .table-row,.table-head { grid-template-columns:40px 72px 1fr; } .table-row .reset { font-size:8px; } .clawd { font-size:8px; line-height:8px; } }
+</style>
+<svg class="symbol" aria-hidden="true"><defs><symbol id="reset" viewBox="0 0 16 16"><path d="M3 6a5.3 5.3 0 1 1 .1 4M3 2v4h4"/><path d="M8 5v3l2 1.5"/></symbol></defs></svg>
+<main>
+  <header><div><div class="eyebrow">Account switcher / Design study</div><h1>A clearer view of your next reset.</h1><p>Three directions for usage, account availability and automatic switching.</p></div><div class="sample">Illustrative data · Sunday 11 October, 14:10<br>All reset times shown in Europe/London · BST</div></header>
+  <div class="grid" id="designs"></div>
+  <div class="legend"><span><b class="good">○ Available</b> &nbsp; <b class="warn">! Low budget / sign in</b> &nbsp; <b class="stop">◷ Exhausted</b> &nbsp; ↻ Reset</span><span>Design concepts · Sample usage only · Auto-switch starts off</span></div>
+</main>
+<script>
+const accounts = [
+  {name:'Personal',email:'sam@example.com',plan:'Pro',status:'● active',hat:'hat',hatText:'  ▟ ▟ ▟\n  █████',quotas:[{name:'5-hour',short:'5h',left:64,at:'Sun 11 Oct, 16:30',in:'2h 20m'},{name:'Weekly',short:'Week',left:28,at:'Wed 14 Oct, 09:00'}]},
+  {name:'Work',email:'sam@acme.example',plan:'Max',status:'○ available',hat:'top',hatText:'   ███\n  ▄███▄',quotas:[{name:'5-hour',short:'5h',left:92,at:'Sun 11 Oct, 18:45',in:'4h 35m'},{name:'Weekly',short:'Week',left:76,at:'Fri 16 Oct, 12:00'}]},
+  {name:'Client',email:'sam@client.example',plan:'Team',status:'◷ exhausted',hat:'cap',hatText:'   ▄█▄\n  █████',quotas:[{name:'5-hour',short:'5h',left:0,at:'Sun 11 Oct, 15:00',in:'50m'},{name:'Weekly',short:'Week',left:41,at:'Thu 15 Oct, 08:00'}]},
+];
+const concepts = [
+  {title:'Usage cards',style:'cards',caption:'A calm, visual overview. Remaining budget and reset time sit together.',note:'Best for quickly comparing how much usage remains.'},
+  {title:'Compact ledger',style:'ledger',caption:'More accounts, less scrolling. Aligned figures keep the sidebar easy to scan.',note:'Best for four or more accounts and smaller terminals.'},
+  {title:'Reset agenda',style:'agenda',caption:'Know what comes back next. Reset times lead, with budget shown underneath.',note:'Best when knowing the next reset matters most.'},
+];
+const icon = '<svg aria-hidden="true"><use href="#reset"/></svg>';
+const colour = q => q.left === 0 ? 'stop' : q.left < 30 ? 'warn' : 'good';
+const head = a => `<div class="account-head"><div><div class="name">${a.name}<span class="state ${a.name==='Client'?'stop':''}">${a.status}</span></div><div class="sub">${a.email} · ${a.plan}</div></div><pre class="clawd"><span class="${a.hat}">${a.hatText}</span>\n ▐▛███▜▌\n▝▜█████▛▘\n  ▘▘ ▝▝</pre></div>`;
+function quotas(a,style) {
+  if(style==='ledger') return (a.name==='Personal'?'<div class="table-head"><span>WINDOW</span><span>LEFT</span><span>RESETS · BST</span></div>':'')+a.quotas.map(q=>`<div class="table-row"><span>${q.short}</span><span class="${colour(q)}">${String(q.left).padStart(2)}% <span class="smallbar">${'▰'.repeat(Math.round(q.left/25))}${'▱'.repeat(4-Math.round(q.left/25))}</span></span><span class="reset">${icon}${q.at.replace(',','')}</span></div>`).join('')+(a.name==='Client'?'<div class="statusline">Available again in 50m</div>':'');
+  if(style==='agenda') return '<div class="timeline">'+a.quotas.map(q=>`<div class="event"><div class="when">${q.at.replace(',',' ·')} <span class="muted">↻</span></div><div class="detail">${q.name} reset · <span class="${colour(q)}">${q.left}% left</span>${q.in?' · in '+q.in:''}</div></div>`).join('')+'</div>';
+  if(a.name==='Client') return '<div class="qline"><span class="label">5-hour <span class="stop">0%</span> · Weekly <span class="good">41%</span></span></div>'+a.quotas.map(q=>`<div class="reset" style="margin-top:7px">${icon}${q.short}: ${q.at}${q.in?' · in '+q.in:''}</div>`).join('');
+  return a.quotas.map(q=>`<div class="quota"><div class="qline"><span class="label">${q.name}</span><span class="${colour(q)}">${q.left}% left</span></div><div class="bar"><span class="${colour(q)}">${'━'.repeat(Math.round(q.left/4))}</span>${'━'.repeat(25-Math.round(q.left/4))}</div><div class="reset">${icon}${q.at}${q.in?' · in '+q.in:''}</div></div>`).join('');
+}
+document.getElementById('designs').innerHTML = concepts.map((c,i)=>`<section><div class="heading"><h2>${c.title}</h2>${i===0?'<span class="badge">Recommended</span>':''}</div><p class="caption">${c.caption}</p><div class="terminal ${c.style}"><div class="chrome"><span>Accounts</span><span>esc ×</span></div><div class="content">${c.style==='agenda'?`<div class="summary"><div class="section" style="margin-bottom:0">NEXT ACCOUNT BACK</div><div class="time">50 min <small>until Client resets</small></div><div class="reset">${icon}Sun 11 Oct, 15:00 BST</div></div>`:''}${accounts.map((a,j)=>`${c.style!=='agenda'&&j<2?'<div class="section '+(j?'spaced':'')+'">'+(j?'SWITCH TO':'ACTIVE ACCOUNT')+'</div>':''}<div class="account ${j===0?'active':''}">${head(a)}${quotas(a,c.style)}</div>`).join('')}${c.style==='ledger'?'<div class="account"><div class="row"><div><div class="name muted">Side project</div><div class="sub">sam@side.example · Pro</div></div><span class="state warn">! sign in</span></div><div class="statusline">Usage unavailable · run /login</div></div>':''}<div class="auto"><div class="row"><span>Auto-switch</span><button class="switch" role="switch" aria-checked="false" aria-label="Auto-switch preview">[ off ]</button></div><div class="hint">Try available accounts when budget runs out.</div></div><div class="add">+ Add an account</div></div><div class="footer">↑↓ move · enter select · s auto-switch<br>←→ change hat · r refresh · Times in BST</div></div><p class="note">${c.note}</p></section>`).join('');
+document.querySelectorAll('.switch').forEach(button=>button.addEventListener('click',()=>{const enabled=button.getAttribute('aria-checked')!=='true';button.setAttribute('aria-checked',String(enabled));button.textContent=enabled?'[ on ]':'[ off ]';button.classList.toggle('good',enabled);}));
+</script>
+</html>

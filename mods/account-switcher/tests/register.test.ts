@@ -28,7 +28,7 @@ function machine(): Map<string, string> {
 }
 
 // Answers $.fs, $.process, $.env and $.store from memory.
-function stub(on: On, files: Map<string, string>, opts: { env?: Record<string, string>; logs?: string[]; store?: Map<string, unknown> } = {}) {
+function stub(on: On, files: Map<string, string>, opts: { env?: Record<string, string>; logs?: string[]; store?: Map<string, unknown>; usageRead?: () => void } = {}) {
   const dirs = new Set<string>()
   const env = new Map(Object.entries({ HOME, ...opts.env }))
   const store = opts.store ?? new Map<string, unknown>()
@@ -73,6 +73,7 @@ function stub(on: On, files: Map<string, string>, opts: { env?: Record<string, s
   on('session.id', () => ({ value: 'session-1' }))
   on('session.start', () => ({ cwd: '/work' }))
   on('command.register', () => ({ value: undefined }))
+  on('http.fetch', () => { opts.usageRead?.(); return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ five_hour: { utilization: 36, resets_at: '2099-10-11T15:30:00Z' }, seven_day: { utilization: 72, resets_at: '2099-10-14T08:00:00Z' } }) } } })
   on('ui.log', ($, e) => {
     logs.push(e.text)
     return { value: undefined }
@@ -96,6 +97,148 @@ const PANE_SITE = {
 
 const headless = { surface: null, isInteractive: false, cwd: '/work' } as const
 const interactive = { surface: 'terminal', isInteractive: true, cwd: '/work' } as const
+
+function failures(on: On, rejectPrompt = false) {
+  const prompts: string[] = []
+  on('classic.StopFailure', () => ({}))
+  on('turn.complete', ($, e) => ({ text: e.answer }))
+  on('prompt.submit', ($, e) => {
+    if (rejectPrompt) return { drop: 'prompt queue unavailable' }
+    prompts.push(e.text)
+    return { text: e.text }
+  })
+  return prompts
+}
+
+async function failTurn($: Parameters<Parameters<typeof test>[1]>[0], error: 'rate_limit' | 'billing_error' | 'overloaded' | 'server_error' | 'authentication_failed' | 'invalid_request' = 'rate_limit') {
+  await $.classic.StopFailure({ error })
+  await $.turn.complete({ turnId: 'turn-1', answer: '', durationMs: 0, isAborted: false, reason: 'error' })
+}
+
+test('auto-switch starts off and leaves budget failures alone', async ($, on) => {
+  const { env } = stub(on, machine())
+  const prompts = failures(on)
+  await $.session.start(headless)
+  await failTurn($)
+  expect(env.has('CLAUDE_SECURESTORAGE_CONFIG_DIR')).toBe(false)
+  expect(prompts).toEqual([])
+})
+
+test('auto-switch tries every account once and stops when all are exhausted', async ($, on) => {
+  const files = machine()
+  const carol = `${ACCOUNTS}/c_org-c`
+  files.set(`${carol}/.credentials.json`, creds('rt-c'))
+  files.set(`${carol}/account.json`, JSON.stringify({ label: 'Other', oauthAccount: CAROL }))
+  const { env, logs, clock } = stub(on, files)
+  const prompts = failures(on)
+  await $.session.start(headless)
+  await $.command.run({ command: 'account-switch', args: 'auto on' })
+  await failTurn($)
+  expect(env.get('CLAUDE_SECURESTORAGE_CONFIG_DIR')).toBe(carol)
+  await failTurn($, 'billing_error')
+  expect(env.get('CLAUDE_SECURESTORAGE_CONFIG_DIR')).toBe(WORK)
+  await failTurn($)
+  await failTurn($)
+  await clock.settle()
+  expect(logs.filter(line => line.includes('could not continue'))).toEqual([])
+  expect(prompts.length).toBe(2)
+  expect(logs.some(line => line.includes('all available accounts are out of budget'))).toBe(true)
+  expect(JSON.parse(files.get(HOME_CREDS) as string).claudeAiOauth.refreshToken).toBe('rt-b')
+})
+
+test('auto-switch restores its setting and wraps from the last account to the default', async ($, on) => {
+  const { env } = stub(on, machine(), {
+    env: { CLAUDE_SECURESTORAGE_CONFIG_DIR: WORK },
+    store: new Map([['auto-switch', true]]),
+  })
+  const prompts = failures(on)
+  await $.session.start(headless)
+  await failTurn($)
+  expect(env.has('CLAUDE_SECURESTORAGE_CONFIG_DIR')).toBe(false)
+  expect(prompts.length).toBe(1)
+})
+
+test('auto-switch skips accounts needing login and ignores unrelated errors', async ($, on) => {
+  const files = machine()
+  files.delete(`${WORK}/.credentials.json`)
+  const { env } = stub(on, files, { store: new Map([['auto-switch', true]]) })
+  const prompts = failures(on)
+  await $.session.start(headless)
+  for (const error of ['overloaded', 'server_error', 'authentication_failed', 'invalid_request', 'rate_limit'] as const) {
+    await failTurn($, error)
+  }
+  expect(env.has('CLAUDE_SECURESTORAGE_CONFIG_DIR')).toBe(false)
+  expect(prompts).toEqual([])
+})
+
+test('temporary server limits and subagent failures do not switch accounts', async ($, on) => {
+  const { env } = stub(on, machine(), { store: new Map([['auto-switch', true]]) })
+  const prompts = failures(on)
+  await $.session.start(headless)
+  await $.classic.StopFailure({ error: 'rate_limit', last_assistant_message: 'Server is temporarily limiting requests (not your usage limit)' })
+  await $.turn.complete({ turnId: 'turn-1', answer: '', durationMs: 0, isAborted: false, reason: 'error' })
+  await $.classic.StopFailure({ error: 'rate_limit', agent_id: 'worker-1' })
+  await $.turn.complete({ turnId: 'turn-2', answer: '', durationMs: 0, isAborted: false, reason: 'error' })
+  for (const error of ['overloaded', 'server_error', 'authentication_failed', 'invalid_request'] as const) await failTurn($, error)
+  expect(env.has('CLAUDE_SECURESTORAGE_CONFIG_DIR')).toBe(false)
+  expect(prompts).toEqual([])
+})
+
+test('an interrupted turn does not continue automatically', async ($, on) => {
+  const { env } = stub(on, machine(), { store: new Map([['auto-switch', true]]) })
+  const prompts = failures(on)
+  await $.session.start(headless)
+  await $.classic.StopFailure({ error: 'rate_limit' })
+  await $.turn.complete({ turnId: 'turn-1', answer: '', durationMs: 0, isAborted: true, reason: 'aborted' })
+  expect(env.has('CLAUDE_SECURESTORAGE_CONFIG_DIR')).toBe(false)
+  expect(prompts).toEqual([])
+})
+
+test('a rejected continuation is reported without trying another account', async ($, on) => {
+  const { env, logs } = stub(on, machine(), { store: new Map([['auto-switch', true]]) })
+  failures(on, true)
+  await $.session.start(headless)
+  await failTurn($)
+  expect(env.get('CLAUDE_SECURESTORAGE_CONFIG_DIR')).toBe(WORK)
+  expect(logs.some(line => line.includes('prompt queue unavailable'))).toBe(true)
+})
+
+test('turning auto-switch off prevents further continuations', async ($, on) => {
+  const { env, store } = stub(on, machine())
+  const prompts = failures(on)
+  await $.session.start(headless)
+  await $.command.run({ command: 'account-switch', args: 'auto on' })
+  expect(store.get('auto-switch')).toBe(true)
+  await failTurn($)
+  await $.command.run({ command: 'account-switch', args: 'auto off' })
+  await failTurn($)
+  expect(store.get('auto-switch')).toBe(false)
+  expect(env.get('CLAUDE_SECURESTORAGE_CONFIG_DIR')).toBe(WORK)
+  expect(prompts.length).toBe(1)
+})
+
+test('a failed account switch reports the error and does not queue a continuation', async ($, on) => {
+  const files = machine()
+  const { logs } = stub(on, files, { store: new Map([['auto-switch', true]]) })
+  const prompts = failures(on)
+  await $.session.start(headless)
+  files.set(CONFIG, '{broken')
+  await failTurn($)
+  expect(prompts).toEqual([])
+  expect(logs.some(line => line.startsWith('Auto-switch failed:'))).toBe(true)
+})
+
+test('the sidebar toggles auto-switch and shows the saved setting', async ($, on) => {
+  const { store } = stub(on, machine())
+  await $.session.start(headless)
+  const ui = await $.ui.mount(PANE_SITE)
+  expect((await ui.find({ key: 'auto-switch' }))?.props.label).toBe('Auto-switch: off')
+  await ui.press({ key: 'auto-switch' })
+  expect(store.get('auto-switch')).toBe(true)
+  expect((await ui.find({ key: 'auto-switch' }))?.props.label).toBe('Auto-switch: on')
+  await ui.press({ key: 'auto-switch' })
+  expect(store.get('auto-switch')).toBe(false)
+})
 
 test('/account-switch list shows every account and which this session uses', async ($, on) => {
   stub(on, machine())
@@ -307,14 +450,58 @@ test('the sidebar lists accounts, and pressing one switches this session', async
   expect(await $.command.run({ command: 'account-switch', args: '' })).toEqual({})
 
   const ui = await $.ui.mount(PANE_SITE)
-  expect(await ui.find({ type: 'Text', text: 'ACTIVE' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: 'SWITCH TO' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: 'Work' })).toBeDefined()
+  expect(await ui.find({ key: 'account-list' })).toBeDefined()
+  expect(await ui.find({ key: 'account-footer' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' Work ' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'WINDOW  LEFT       RESETS' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' 64% ▰▰▱▱ ' })).toBeDefined()
+  expect(await ui.find({ key: 'refresh-usage' })).toBeDefined()
+  await ui.press({ key: 'refresh-usage' })
   // Clawd's body rows are drawn beside every account.
   expect(await ui.find({ type: 'Text', text: '▝▜█████▛▘' })).toBeDefined()
   await ui.press({ key: 'use-a_org-a' })
 
   expect(env.get('CLAUDE_SECURESTORAGE_CONFIG_DIR')).toBe(WORK)
+})
+
+test('usage refreshes every fifteen seconds while open and stops when closed', async ($, on) => {
+  let open = false
+  let reads = 0
+  const { clock } = stub(on, machine(), { usageRead: () => reads++ })
+  on('session.surfaces', () => ({ value: ['terminal'] }))
+  on('ui.panes', () => ({ value: open ? [{ id: 'accounts' }] : [] }))
+  on('ui.open', () => { open = true; return { value: { isPlaced: true } } })
+  on('ui.close', () => { open = false; return { value: undefined } })
+  await $.session.start(headless)
+  await $.command.run({ command: 'account-switch', args: '' })
+  expect(reads).toBe(2)
+  await clock.advance(14999)
+  expect(reads).toBe(2)
+  await clock.advance(1)
+  expect(reads).toBe(4)
+  await clock.advance(15000)
+  expect(reads).toBe(6)
+  await $.command.run({ command: 'account-switch', args: '' })
+  await clock.advance(30000)
+  expect(reads).toBe(6)
+  await $.command.run({ command: 'account-switch', args: '' })
+  expect(reads).toBe(8)
+  await clock.advance(15000)
+  expect(reads).toBe(10)
+})
+
+test('a narrow ledger stacks reset times and keeps its controls', async ($, on) => {
+  stub(on, machine())
+  on('session.surfaces', () => ({ value: ['terminal'] }))
+  on('ui.panes', () => ({ value: [] }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  await $.session.start(headless)
+  await $.command.run({ command: 'account-switch', args: '' })
+  const ui = await $.ui.mount({ ...PANE_SITE, props: { ...PANE_SITE.props, bodyColumns: 30 } })
+  expect(await ui.find({ type: 'Text', text: 'WINDOW  LEFT / RESETS' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' 64% ▰▰▱▱ ' })).toBeDefined()
+  expect(await ui.find({ key: 'auto-switch' })).toBeDefined()
+  expect(await ui.find({ key: 'refresh-usage' })).toBeDefined()
 })
 
 test('Right and Left over an account change its hat and keep it', async ($, on) => {
@@ -334,10 +521,10 @@ test('Right and Left over an account change its hat and keep it', async ($, on) 
   await $.ui.scroll({ ...page, by: 30 })
   await $.ui.scroll({ ...page, by: -30 })
   // A single-row scroll from the wheel or arrows still scrolls.
-  const wheel = await $.ui.scroll({ ...page, by: 1 })
+  const wheel = await $.ui.scroll({ ...page, by: 1, pointer: { row: 3, column: 2 } })
 
   expect(right.deny).toBe('changed the hat instead')
-  expect(wheel.deny).toBeUndefined()
+  expect(wheel.deny).toBe('scroll accounts inside the fixed panel')
   expect(JSON.parse(files.get(`${WORK}/account.json`) as string).hat).toBe('top')
   const ui = await $.ui.mount(PANE_SITE)
   expect(await ui.find({ type: 'Text', text: 'Top hat · ←→ to change hat' })).toBeDefined()

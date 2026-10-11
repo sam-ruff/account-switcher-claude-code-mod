@@ -1,0 +1,62 @@
+name: Verify and release
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: account-switcher-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  verify:
+    runs-on: [self-hosted, sophie]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.17.0'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run test:release
+      - run: npx claude plugin validate .
+      - run: npx claude plugin validate mods/account-switcher
+      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff
+        with:
+          version: '0.12.6'
+          enable-cache: false
+      - name: Integration tests against the fake API
+        run: uv run --with pyte==0.8.2 --with pytest==8.4.2 pytest scripts/test_auto_switch.py
+        env:
+          CLAUDE_TEST_BINARY: ${{ github.workspace }}/node_modules/.bin/claude
+      - name: Session isolation integration test
+        run: uv run --with pyte==0.8.2 bash scripts/integration-test.sh "$PWD/node_modules/.bin/claude"
+
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: verify
+    runs-on: [self-hosted, sophie]
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.17.0'
+          cache: npm
+      - run: npm ci
+      - run: npm run release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,143 +1,143 @@
-// The account sidebar: the session's account in a box at the top, the others
-// below, each with Clawd on the right wearing that account's hat.
+import type { Elements, RenderElement } from 'claude-code'
 import { type Account, displayName } from './accounts.ts'
 import { clawdRows, hatById, type Segment } from './clawd.ts'
+import { type UsageEntry, USAGE_REFRESH_MS, remaining, resetLabel, usageStatus } from './usage.ts'
 
-type Element = (props: object) => unknown
-
-export interface PanelElements {
-  Box: Element
-  Text: Element
-  Button: Element
-}
+export type PanelElements = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'>
 
 export interface PanelState {
   accounts: Account[]
   current: Account | undefined
-  /** Key of the control holding the keyboard, as `ui.focus` named it. */
   focused: string
   notice: string
+  autoSwitch: boolean
   width: number
+  height: number
+  offset: number
+  usage: ReadonlyMap<string, UsageEntry>
+  now: number
 }
 
 export interface PanelActions {
   choose(account: Account): () => Promise<void>
   add(): Promise<void>
+  toggleAutoSwitch(): Promise<void>
+  refreshUsage(): Promise<void>
 }
 
 export const useKey = (account: Account) => `use-${account.key}`
 
-function plan(account: Account): string {
-  return account.plan ? account.plan.charAt(0).toUpperCase() + account.plan.slice(1) : ''
+export function nextPanelFocus(keys: string[], focused: string, direction: number): string | undefined {
+  return keys[Math.max(0, Math.min(keys.length - 1, keys.indexOf(focused) + Math.sign(direction)))]
 }
 
-function segmentLine({ Box, Text }: PanelElements, segments: Segment[]): unknown {
-  return Box({
-    flexDirection: 'row',
-    children: segments.map(s => Text({ color: s.colour, ...(s.background ? { backgroundColor: s.background } : {}), children: [s.text] })),
-  })
+export function panelGeometry(width: number, height: number, count: number, offset: number) {
+  const rowHeight = width < 44 ? 12 : 10
+  const footerHeight = Math.min(8, Math.max(4, height - 5))
+  const listHeight = Math.max(1, height - footerHeight - 2)
+  const maxOffset = Math.max(0, count * rowHeight - (count ? 1 : 0) - listHeight)
+  return { rowHeight, footerHeight, listHeight, maxOffset, offset: Math.max(0, Math.min(offset, maxOffset)) }
 }
 
-function clawd(el: PanelElements, account: Account): unknown {
-  return el.Box({ flexDirection: 'column', flexShrink: 0, children: clawdRows(hatById(account.hat)).map(row => segmentLine(el, row)) })
+export function orderedAccounts(state: Pick<PanelState, 'accounts' | 'current'>): Account[] {
+  return [...(state.current ? [state.current] : []), ...state.accounts.filter(a => a.dir !== state.current?.dir)]
 }
 
-/** The rows of text beside Clawd: email and plan, then organisation, then any warning. */
-function details(el: PanelElements, account: Account, dim: boolean): unknown[] {
-  const { Text } = el
-  return [
-    Text({ dimColor: dim, wrap: 'truncate-end', children: [[account.oauthAccount.emailAddress, plan(account)].filter(Boolean).join(' · ')] }),
-    Text({ dimColor: dim, wrap: 'truncate-end', children: [account.oauthAccount.organizationName ?? ' '] }),
-    ...(account.needsLogin ? [Text({ color: 'warning', wrap: 'truncate-end', children: ['sign in again with /login'] })] : []),
-  ]
+function segmentLine({ Box, Text }: PanelElements, segments: Segment[]): RenderElement {
+  return Box({ flexDirection: 'row', children: segments.map(s => Text({ color: s.colour, ...(s.background ? { backgroundColor: s.background } : {}), children: [s.text] })) })
 }
 
-export function panel(el: PanelElements, state: PanelState, actions: PanelActions): unknown {
+function usageRows({ Box, Text }: PanelElements, entry: UsageEntry | undefined, state: PanelState, header: boolean): RenderElement[] {
+  const text = (value: string, colour?: string) => Text({ ...(colour ? { color: colour } : { dimColor: true }), wrap: 'wrap', children: [value] })
+  if (!entry || entry.status === 'loading') return [text('Reading usage…')]
+  if (entry.status === 'sign-in') return [text('Sign in again with /login', 'warning')]
+  if (entry.status === 'refresh-login') return [text('Usage unavailable · switch to refresh login')]
+  if (entry.status === 'limited') return [text('Usage refresh rate-limited · try later')]
+  if (entry.status !== 'ready') return [text('Usage unavailable · r to retry')]
+
+  const narrow = state.width < 44
+  const stale = entry.checkedAt === undefined || state.now - entry.checkedAt >= USAGE_REFRESH_MS
+  const rows: RenderElement[] = header ? [text(narrow ? 'WINDOW  LEFT / RESETS' : 'WINDOW  LEFT       RESETS')] : []
+  for (const label of ['5h', 'Week']) {
+    const window = entry.windows.find(w => w.label === label)
+    const resetPassed = window?.resetsAt && Date.parse(window.resetsAt) <= state.now
+    const left = window && !stale && !resetPassed ? remaining(window) : undefined
+    const fraction = left === 0 && window !== undefined && window.used < 100
+    const colour = left === undefined ? 'subtle' : left === 0 && !fraction ? 'error' : left < 30 ? 'warning' : 'success'
+    const blocks = left === undefined ? '····' : '▰'.repeat(Math.floor(left / 25)) + '▱'.repeat(4 - Math.floor(left / 25))
+    const percent = left === undefined ? ' --%' : fraction ? ' <1%' : `${left}%`.padStart(4)
+    const reset = resetPassed ? 'Reset passed · r to refresh' : resetLabel(window?.resetsAt)
+    const values = Box({ flexDirection: 'row', children: [text(label.padEnd(8), 'text'), text(`${percent} ${blocks} `, colour)] })
+    rows.push(narrow
+      ? Box({ flexDirection: 'column', children: [values, text(`↻ ${reset}`)] })
+      : Box({ flexDirection: 'row', children: [values, text(`↻ ${reset}`)] }))
+  }
+  return rows
+}
+
+function accountRow(el: PanelElements, state: PanelState, actions: PanelActions, account: Account, first: boolean): RenderElement {
   const { Box, Text, Button } = el
-  const blank = () => Text({ children: [' '] })
-  const isFocused = (a: Account) => state.focused === useKey(a)
-  // The terminal inverts the focused Button's text, so each row's Button holds
-  // only its marker and the row draws its own highlight around it.
-  const select = (a: Account, marker: unknown, autoFocus: boolean) =>
-    Button({ key: useKey(a), plain: true, onPress: actions.choose(a), ...(autoFocus ? { autoFocus: true as const } : {}), children: [marker] })
-
-  const mine = state.current
-  const others = state.accounts.filter(a => a.dir !== mine?.dir)
-  const addFocused = state.focused === 'add'
-  const focusedAccount = state.accounts.find(isFocused)
-
-  const active = mine
-    ? Box({
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        borderStyle: 'round',
-        borderColor: isFocused(mine) ? 'claude' : 'success',
-        paddingX: 2,
-        marginTop: 1,
-        children: [
-          Box({ flexDirection: 'column', flexShrink: 1, children: [
-            Box({ flexDirection: 'row', children: [
-              select(mine, Text({ children: [''] }), true),
-              Text({ bold: true, wrap: 'truncate-end', children: [displayName(mine)] }),
-              Text({ color: 'success', children: ['  ● active'] }),
-            ] }),
-            ...details(el, mine, true),
+  const active = account.dir === state.current?.dir
+  const focused = state.focused === useKey(account)
+  const entry = account.needsLogin ? { status: 'sign-in' as const, windows: [] } : state.usage.get(account.dir)
+  const status = usageStatus(entry, state.now)
+  const backgroundColor = active ? (focused ? 'rgb(40,65,49)' : 'rgb(31,48,38)') : focused ? 'rgb(53,53,57)' : undefined
+  const plan = account.plan ? account.plan.charAt(0).toUpperCase() + account.plan.slice(1) : ''
+  return Box({ key: `row-${account.key}`, height: panelGeometry(state.width, state.height, state.accounts.length, 0).rowHeight - 1, backgroundColor, paddingX: 1, paddingY: 1, flexDirection: 'column', children: [
+    Box({ flexDirection: 'column', flexGrow: 1, flexShrink: 1, children: [
+      Box({ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', height: 4, children: [
+        Box({ flexDirection: 'column', flexShrink: 1, children: [
+          Box({ flexDirection: state.width < 44 ? 'column' : 'row', columnGap: 1, children: [
+            Box({ flexShrink: 1, children: [Button({ key: useKey(account), plain: true, ...(first ? { autoFocus: true as const } : {}), onPress: actions.choose(account), children: [Text({ bold: true, color: 'text', wrap: 'truncate-end', children: [` ${displayName(account)} `] })] })] }),
+            Text({ color: active ? 'success' : status.colour, children: [active ? '● active' : status.label] }),
           ] }),
-          clawd(el, mine),
-        ],
-      })
-    : Text({ dimColor: true, wrap: 'wrap', children: ['This session is not signed in with a saved account.'] })
-
-  const rows = others.map((a, i) => {
-    const f = isFocused(a)
-    return Box({
-      key: `row-${a.key}`,
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      marginTop: 1,
-      children: [
-        Box({ flexDirection: 'row', flexShrink: 1, children: [
-          select(a, Text({ color: f ? 'claude' : 'subtle', children: [f ? '┃' : '│'] }), !mine && i === 0),
-          Box({ flexDirection: 'column', flexShrink: 1, paddingLeft: 1, children: [
-            Text({ bold: true, color: f ? 'claude' : 'text', wrap: 'truncate-end', children: [displayName(a)] }),
-            ...details(el, a, !f),
-          ] }),
+          Box({ paddingLeft: 1, children: [Text({ dimColor: true, wrap: 'truncate-end', children: [[account.oauthAccount.emailAddress, plan].filter(Boolean).join(' · ')] })] }),
         ] }),
-        Box({ paddingRight: 2, flexShrink: 0, children: [clawd(el, a)] }),
-      ],
-    })
-  })
-
-  return Box({
-    flexDirection: 'column',
-    width: state.width,
-    paddingX: 2,
-    paddingY: 1,
-    children: [
-      Text({ dimColor: true, bold: true, children: ['ACTIVE'] }),
-      active,
-      ...(others.length ? [blank(), Text({ dimColor: true, bold: true, children: ['SWITCH TO'] }), ...rows] : []),
-      blank(),
-      Box({ flexDirection: 'row', children: [
-        Text({ color: addFocused ? 'claude' : 'subtle', children: [addFocused ? '┃ ' : '  '] }),
-        Button({
-          key: 'add',
-          plain: true,
-          hotkey: 'a',
-          onPress: () => actions.add(),
-          children: [Text({ color: addFocused ? 'claude' : 'suggestion', bold: addFocused, children: ['+ Add an account'] })],
-        }),
+        ...(state.width >= 36 ? [Box({ flexDirection: 'column', flexShrink: 0, width: 9, height: 4, children: clawdRows(hatById(account.hat)).map(row => segmentLine(el, row)) })] : []),
       ] }),
-      blank(),
-      Text({ dimColor: true, wrap: 'truncate-end', children: [focusedAccount ? `${hatById(focusedAccount.hat).name} · ←→ to change hat` : ' '] }),
-      Text({ dimColor: true, wrap: 'wrap', children: ['↑↓ move  ⏎ switch  a add  esc close'] }),
-      ...(state.notice ? [blank(), Text({ color: 'warning', wrap: 'wrap', children: [state.notice] })] : []),
-    ],
-  })
+      Box({ paddingLeft: 1, flexDirection: 'column', children: usageRows(el, entry, state, true) }),
+    ] }),
+  ] })
 }
 
-/** Rows the panel needs, so an inline pane opens tall enough to show every account. */
+export function panel(el: PanelElements, state: PanelState, actions: PanelActions): RenderElement {
+  const { Box, Text, Button } = el
+  const accounts = orderedAccounts(state)
+  const focused = state.accounts.find(a => state.focused === useKey(a))
+  const geometry = panelGeometry(state.width, state.height, accounts.length, state.offset)
+  const line = '─'.repeat(Math.max(1, state.width - (state.width < 36 ? 2 : 4)))
+  const hint = (value: string) => Text({ dimColor: true, wrap: 'truncate-end', children: [value] })
+  // One spare row keeps native scroll keys active; the hook scrolls only the list.
+  return Box({ flexDirection: 'column', width: state.width, height: state.height + 1, paddingX: state.width < 36 ? 1 : 2, overflow: 'hidden', children: [
+    Box({ height: 2, flexShrink: 0, justifyContent: 'space-between', children: [
+      Text({ bold: true, children: ['Accounts'] }),
+      hint(geometry.maxOffset ? `${geometry.offset > 0 ? '↑' : ' '} ${geometry.offset < geometry.maxOffset ? '↓' : ' '}` : ''),
+    ] }),
+    Box({ key: 'account-list', height: geometry.listHeight, flexShrink: 0, overflow: 'hidden', children: [
+      Box({ position: 'absolute', top: -geometry.offset, left: 0, right: 0, flexDirection: 'column', children: accounts.length ? accounts.map((account, index) =>
+        Box({ height: geometry.rowHeight, flexShrink: 0, flexDirection: 'column', overflow: 'hidden', children: [
+          accountRow(el, state, actions, account, index === 0),
+          Box({ position: 'absolute', bottom: 0, left: 0, right: 0, children: [hint(line)] }),
+        ] })) : [hint('No saved accounts.')] }),
+    ] }),
+    Box({ key: 'account-footer', height: geometry.footerHeight, flexShrink: 0, flexDirection: 'column', overflow: 'hidden', children: [
+      hint(line),
+      Button({ key: 'auto-switch', plain: true, hotkey: 's', label: `Auto-switch: ${state.autoSwitch ? 'on' : 'off'}`, onPress: actions.toggleAutoSwitch }),
+      Box({ flexDirection: state.width < 40 ? 'column' : 'row', columnGap: 2, children: [
+        Button({ key: 'add', plain: true, hotkey: 'a', label: '+ Add account', onPress: actions.add }),
+        Button({ key: 'refresh-usage', plain: true, hotkey: 'r', label: 'Refresh usage', onPress: actions.refreshUsage }),
+      ] }),
+      hint('15s refresh · local reset times'),
+      ...(geometry.footerHeight >= 7 ? [hint(focused ? `${hatById(focused.hat).name} · ←→ to change hat` : '←→ change account hat')] : []),
+      ...(geometry.footerHeight >= 8 && state.width >= 40 ? [state.notice
+        ? Text({ color: 'warning', wrap: 'truncate-end', children: [state.notice] })
+        : hint('Auto-switch tries each signed-in account.')] : []),
+      ...(geometry.footerHeight >= 6 ? [hint('↑↓ / tab move · enter select')] : []),
+      ...(geometry.footerHeight >= 5 ? [hint('esc close')] : []),
+    ] }),
+  ] })
+}
+
 export function panelRows(state: Pick<PanelState, 'accounts' | 'current'>): number {
-  const others = state.accounts.filter(a => a.dir !== state.current?.dir)
-  return 2 + 1 + 6 + (others.length ? 2 + others.length * 5 : 0) + 6
+  return 16 + state.accounts.length * 10
 }

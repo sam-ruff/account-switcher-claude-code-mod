@@ -356,6 +356,13 @@ export class AccountStore {
     return this.paths.configDir
   }
 
+  async usageToken(account: Account, now: number): Promise<string | undefined> {
+    const credentials = await this.creds.read(account.dir)
+    const oauth = credentials?.claudeAiOauth as { accessToken?: unknown; expiresAt?: unknown } | undefined
+    if (typeof oauth?.expiresAt === 'number' && oauth.expiresAt <= now) return undefined
+    return typeof oauth?.accessToken === 'string' && oauth.accessToken ? oauth.accessToken : undefined
+  }
+
   /** Every account with a login: the home account first, then saved ones by name. */
   async list(): Promise<Account[]> {
     const now = await this.io.now()

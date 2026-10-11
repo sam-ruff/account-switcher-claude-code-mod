@@ -2,7 +2,7 @@
 
 A Claude Code mod for people with more than one Claude subscription. Each session can run on a different account, and you can switch a session live without logging out. Two terminals open side by side can be on your work and personal accounts at the same time.
 
-![Opening the account sidebar, changing Clawd's hat, switching to the Work account and checking /status](docs/demo.gif)
+![Opening the account sidebar, changing Clawd's hat, switching to Alice and showing the logout confirmation](docs/demo.gif)
 
 It needs Claude Code 2.1.287 or later, the first release that loads mods. It has been tested on Linux with 2.1.295. The macOS and Windows code paths have unit tests but have not been run on either system.
 
@@ -10,26 +10,26 @@ It needs Claude Code 2.1.287 or later, the first release that loads mods. It has
 
 Install it, start Claude Code, and run `/login` once for each account you want to use. After that, press Ctrl+Alt+Shift+numpad minus or run `/account-switch` to open the sidebar.
 
-The one-liners below install from where the repository is hosted. Replace `<repo>` with its address, such as `https://github.com/you/account-switcher`. From a clone, run `./install.sh` or `.\install.ps1` in the repository folder instead.
+The one-liners below install from GitHub. From a clone, run `./install.sh` or `.\install.ps1` in the repository folder instead.
 
-### 🐧 Linux
-
-```sh
-curl -fsSL <repo>/raw/main/install.sh | sh -s -- <repo>.git
-```
-
-### 🍎 macOS
+### Linux
 
 ```sh
-curl -fsSL <repo>/raw/main/install.sh | sh -s -- <repo>.git
+curl -fsSL https://github.com/sam-ruff/account-switcher-claude-code-mod/raw/main/install.sh | sh -s -- https://github.com/sam-ruff/account-switcher-claude-code-mod.git
 ```
 
-### 🪟 Windows
+### macOS
+
+```sh
+curl -fsSL https://github.com/sam-ruff/account-switcher-claude-code-mod/raw/main/install.sh | sh -s -- https://github.com/sam-ruff/account-switcher-claude-code-mod.git
+```
+
+### Windows
 
 In PowerShell:
 
 ```powershell
-& ([scriptblock]::Create((irm <repo>/raw/main/install.ps1))) -Source <repo>.git
+& ([scriptblock]::Create((irm https://github.com/sam-ruff/account-switcher-claude-code-mod/raw/main/install.ps1))) -Source https://github.com/sam-ruff/account-switcher-claude-code-mod.git
 ```
 
 Each script checks your Claude Code version, adds this repository as a plugin marketplace and installs the mod. To remove it, run the same script with `--uninstall` (`-Uninstall` on Windows).
@@ -42,15 +42,39 @@ Open the sidebar with Ctrl+Alt+Shift+numpad minus, with `/account-switch`, or by
 
 | Key | In the sidebar |
 | :- | :- |
-| Up, Down | Move between accounts |
+| Tab, Shift+Tab | Move between accounts and controls |
+| Up, Down | Move between accounts and controls, keeping the selection visible |
 | Enter | Switch this session to the selected account |
 | Right, Left | Change the hat Clawd wears for that account |
 | a | Add an account (runs `/login`) |
+| s | Toggle auto-switch |
+| r | Refresh usage |
 | Esc | Close |
 
-![The account sidebar, with the active account at the top and two others below](docs/sidebar.png)
+![The compact ledger sidebar with a green active account, account dividers, remaining usage and a fixed footer](docs/sidebar.png)
 
-The account at the top, under ACTIVE, is the one this session uses. Every other session keeps its own. Clawd sits beside each account, and his hat tells them apart at a glance. There are 13 to choose from, and each account remembers its own.
+The green account row is the one this session uses. Every other session keeps its own. Keyboard focus adds a light background tint and a padded name highlight; moving focus does not switch accounts until you press Enter. Clawd and his hat sit beside the account name, with matching space above and below each row. There are 13 hats to choose from, and each account remembers its own.
+
+The compact ledger shows each account's remaining five-hour and weekly usage, with reset icons and local dates and times. Opening the panel reads usage using each account's own login, without switching the session. Usage refreshes every 15 seconds while the panel is open; closing it stops polling. Press `r` to request an immediate refresh. Missing or stale readings show as unknown. If the server rate-limits a refresh, automatic and manual refreshes both wait for its retry delay, with a minimum wait of 15 seconds. Expired logins need a switch to that account to refresh. Model-specific limits and extra usage are not included.
+
+Accounts scroll inside the panel, separated by dividers. Use Up and Down or Tab to move focus; the selected account scrolls into view. The mouse wheel scrolls the account list. Controls and hints stay in a fixed footer. Names, emails and usage share the same left alignment. In narrow terminals the panel opens inline, and reset times stack below percentages when space is tight.
+
+<details>
+<summary>Keyboard focus and narrow terminal screenshots</summary>
+
+Alice has keyboard focus below, while Bob remains active in green. The original Clawd artwork keeps its proportions, including when wearing a hat.
+
+![Alice's grey focus tint and padded name highlight beside Bob's green active row and hat](docs/designs/ledger-selected.png)
+
+In an 80-column terminal, scrolling from Bob to Carol leaves the controls and hints in place.
+
+![The narrow panel showing Bob above the fixed footer](docs/designs/ledger-80.png)
+
+![The same narrow panel scrolled to Carol with the footer still visible](docs/designs/ledger-80-footer.png)
+
+</details>
+
+The screenshots use fictional accounts and fixed usage readings from the integration test's local API.
 
 The same things work as commands, which is handy in `claude -p` where there is no sidebar:
 
@@ -61,7 +85,13 @@ The same things work as commands, which is handy in `claude -p` where there is n
 /account-switch rename sam@acme.example Work
 /account-switch hat work crown
 /account-switch forget client
+/account-switch auto on              enable automatic budget failover
+/account-switch auto off             disable it
 ```
+
+Auto-switch is off by default. Enable it in the sidebar or with `/account-switch auto on`; the mod remembers the setting. When an account hits a usage or billing limit, the session switches to the next signed-in account in list order, wrapping to the top, and sends a continuation prompt. Each account is tried once before stopping. Accounts needing `/login` are skipped. A new prompt from you, a manual switch, or toggling the setting starts a fresh attempt. Other sessions keep their own account.
+
+Temporary server limits, other API errors, interrupted turns and subagent failures do not trigger auto-switch.
 
 Don't use `/logout` to change accounts. Claude Code revokes the login on Anthropic's side when you log out, so every session using that account is signed out and you would have to sign in to it again. The mod asks before letting `/logout` go ahead.
 
@@ -91,9 +121,36 @@ A session remembers its account across `claude --resume`.
 
 ## Development
 
+To try the current checkout with your own accounts, run this from the repository root, then enter `/account-switch`. Use `/login` if an account needs signing in again.
+
 ```sh
-cd mods/account-switcher && claude plugin test       # unit tests, no session or network
+claude --plugin-dir "$PWD/mods/account-switcher"
+```
+
+For a browser terminal, install `ttyd` and run:
+
+```sh
+COLORTERM=truecolor FORCE_COLOR=3 ttyd -i 127.0.0.1 -p 7681 -W -O -w "$PWD" claude --plugin-dir "$PWD/mods/account-switcher"
+```
+
+Open [localhost:7681](http://localhost:7681). This runs Claude Code with your local profile and accounts; it is an interactive terminal bound to this machine's loopback address.
+
+Run the automated checks from the repository root:
+
+```sh
+npm test                                           # unit tests, no session or network
 scripts/integration-test.sh [path-to-claude]         # two real sessions against a fake API
+uv run --with pytest --with pyte pytest scripts/test_auto_switch.py
 ```
 
 The integration test runs two Claude Code sessions side by side on one throwaway home directory. One stays on the default account and the other switches away and back. A fake API records which token each session sent, and both sessions run `/status`. It needs Python with `pyte`.
+
+To regenerate the terminal screenshots and demo from the current implementation:
+
+```sh
+LEDGER_SCREENSHOTS="$PWD/docs/designs" uv run --with pytest --with pyte --with Pillow --with fonttools pytest scripts/test_auto_switch.py -k '140 or 80'
+```
+
+CI runs on the local `[self-hosted, sophie]` pool. After tests pass on a push to `main`, semantic-release uses Conventional Commits to update both plugin manifests and the changelog, then publishes a GitHub tag and release. `feat` makes a minor release; `fix`, `perf` and `refactor` make patches; breaking changes make major releases. The release job needs the repository's `GITHUB_TOKEN` to write contents, including the version commit on `main`.
+
+The [usage and reset design study](docs/designs/usage-options.html) contains three sidebar concepts with illustrative data. These previews do not fetch live usage.
