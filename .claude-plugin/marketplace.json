@@ -1,14 +1,19 @@
 {
   "name": "account-switcher",
   "description": "A Claude Code mod for running sessions on different Claude subscription accounts",
-  "owner": { "name": "developer" },
-  "metadata": { "pluginRoot": "./mods" },
+  "owner": {
+    "name": "developer"
+  },
+  "metadata": {
+    "pluginRoot": "./mods"
+  },
   "plugins": [
     {
       "name": "account-switcher",
       "source": "./mods/account-switcher",
       "description": "Mod: run each Claude Code session on its own Claude subscription account, and switch live from a sidebar (Ctrl+Alt+Shift+numpad -) or /account-switch",
-      "category": "productivity"
+      "category": "productivity",
+      "version": "1.0.0"
     }
   ]
 }
