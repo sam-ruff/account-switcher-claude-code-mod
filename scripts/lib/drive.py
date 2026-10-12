@@ -11,7 +11,8 @@ Each step is one of:
   ["frame", [top, bottom, left?, right?]]      capture a demo frame
   ["gif", path]                              save captured demo frames
 
-Set DRIVE_BASE_URL to point the session at a fake API, and DRIVE_TAG to mark its requests.
+Set DRIVE_BASE_URL to point the session at a fake API, DRIVE_TAG to mark its requests,
+and DRIVE_DEBUG_FILE to keep Claude Code's debug log.
 """
 import fcntl
 import json
@@ -59,11 +60,14 @@ if os.environ.get("DRIVE_BASE_URL"):
     env["ANTHROPIC_BASE_URL"] = os.environ["DRIVE_BASE_URL"]
 if os.environ.get("DRIVE_TAG"):
     env["ANTHROPIC_CUSTOM_HEADERS"] = f"x-session-tag: {os.environ['DRIVE_TAG']}"
+args = [claude, "--plugin-dir", mod]
+if os.environ.get("DRIVE_DEBUG_FILE"):
+    args.extend(["--debug-file", os.environ["DRIVE_DEBUG_FILE"]])
 
 pid, fd = pty.fork()
 if pid == 0:
     os.chdir(workdir)
-    os.execve(claude, [claude, "--plugin-dir", mod], env)
+    os.execve(claude, args, env)
 
 fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
 

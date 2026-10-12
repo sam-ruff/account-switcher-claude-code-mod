@@ -138,13 +138,14 @@ def test_budget_failover(tmp_path, enabled, all_exhausted, ledger_width):
                 steps.append(["png", [str(Path(os.environ["LEDGER_SCREENSHOTS"]) / "ledger-80-footer.png"), 0, 60]])
             steps.extend([["key", "up"], ["wait", 1], ["screen", "focused-account"], ["key", "enter"], ["wait", 1], ["screen", "selected-account"]])
         steps.append(["key", "esc"])
+    debug_log = tmp_path / "debug.log"
     cli = os.environ.get("CLAUDE_TEST_BINARY") or shutil.which("claude")
     assert cli, "Claude Code must be installed"
     try:
         result = subprocess.run(
             [sys.executable, str(ROOT / "scripts/lib/drive.py"), str(project), str(home), cli,
              str(mod), json.dumps(steps)],
-            env={**os.environ, "DRIVE_BASE_URL": f"http://127.0.0.1:{server.server_port}", "DRIVE_COLS": str(ledger_width or 120), "DRIVE_ROWS": "60" if ledger_width else "40"},
+            env={**os.environ, "DRIVE_BASE_URL": f"http://127.0.0.1:{server.server_port}", "DRIVE_COLS": str(ledger_width or 120), "DRIVE_ROWS": "60" if ledger_width else "40", "DRIVE_DEBUG_FILE": str(debug_log)},
             capture_output=True, text=True, timeout=60,
         )
     finally:
@@ -166,7 +167,8 @@ def test_budget_failover(tmp_path, enabled, all_exhausted, ledger_width):
         return
     transitions = [token for index, token in enumerate(requests) if index == 0 or requests[index - 1] != token]
     expected = ["token-bob", "token-alice", "token-carol"] if enabled else ["token-bob"]
-    assert transitions == expected, f"{requests}\n{result.stdout}\n{result.stderr}"
+    debug = debug_log.read_text() if debug_log.exists() else ""
+    assert transitions == expected, f"{requests}\n{result.stdout}\n{result.stderr}\n{debug}"
     transcripts = "\n".join(path.read_text() for path in (config / "projects").rglob("*.jsonl"))
     if enabled and all_exhausted:
         assert "all available accounts are out of budget" in transcripts, result.stdout
