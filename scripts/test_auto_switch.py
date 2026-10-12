@@ -108,6 +108,10 @@ def test_budget_failover(tmp_path, enabled, all_exhausted, ledger_width):
             "accessToken": f"token-{name}", "refreshToken": f"refresh-{name}",
             "expiresAt": 4102444800000, "scopes": ["user:inference", "user:profile"], "subscriptionType": "max",
         }})
+        # Claude Code only reloads a token when the credentials mtime changes, and
+        # coarse filesystem clocks can give files written together the same one.
+        signed_in_at = time.time() - 3600 * (len(identities) - index)
+        os.utime(directory / ".credentials.json", (signed_in_at, signed_in_at))
         if index:
             write(directory / "account.json", {"label": name.title(), "oauthAccount": identity})
 
