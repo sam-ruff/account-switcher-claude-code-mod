@@ -1,3 +1,10 @@
+## [1.1.1](https://github.com/sam-ruff/account-switcher-claude-code-mod/compare/v1.1.0...v1.1.1) (2026-10-18)
+
+
+### Bug Fixes
+
+* keep usage readings on screen while the panel refreshes ([cb600fd](https://github.com/sam-ruff/account-switcher-claude-code-mod/commit/cb600fd40197d4dab604ca0b339c6bb607f94eee))
+
 # [1.1.0](https://github.com/sam-ruff/account-switcher-claude-code-mod/compare/v1.0.0...v1.1.0) (2026-10-18)
 
 
