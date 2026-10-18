@@ -1,7 +1,7 @@
 import type { Elements, RenderElement } from 'claude-code'
 import { type Account, displayName } from './accounts.ts'
 import { clawdRows, hatById, type Segment } from './clawd.ts'
-import { type UsageEntry, USAGE_REFRESH_MS, remaining, resetLabel, usageStatus } from './usage.ts'
+import { type UsageEntry, USAGE_STALE_MS, remaining, resetLabel, usageStatus } from './usage.ts'
 
 export type PanelElements = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'>
 
@@ -56,7 +56,7 @@ function usageRows({ Box, Text }: PanelElements, entry: UsageEntry | undefined, 
   if (entry.status !== 'ready') return [text('Usage unavailable · r to retry')]
 
   const narrow = state.width < 44
-  const stale = entry.checkedAt === undefined || state.now - entry.checkedAt >= USAGE_REFRESH_MS
+  const stale = entry.checkedAt === undefined || state.now - entry.checkedAt >= USAGE_STALE_MS
   const rows: RenderElement[] = header ? [text(narrow ? 'WINDOW  LEFT / RESETS' : 'WINDOW  LEFT       RESETS')] : []
   for (const label of ['5h', 'Week']) {
     const window = entry.windows.find(w => w.label === label)

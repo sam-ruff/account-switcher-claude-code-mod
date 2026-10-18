@@ -30,6 +30,8 @@ export class HttpUsageApi implements UsageApi {
 }
 
 export const USAGE_REFRESH_MS = 15_000
+// Leaves room for the next poll to land before a shown reading counts as stale.
+export const USAGE_STALE_MS = 2 * USAGE_REFRESH_MS
 
 export function parseUsage(body: string): UsageWindow[] {
   const data: unknown = JSON.parse(body)
@@ -75,7 +77,8 @@ export class UsageCache {
     if (previous?.retryAt && previous.retryAt > now) return
     const resetPassed = previous?.windows.some(w => w.resetsAt && Date.parse(w.resetsAt) <= now && Date.parse(w.resetsAt) > (previous.checkedAt ?? 0))
     if (!force && !resetPassed && previous?.checkedAt !== undefined && now - previous.checkedAt < USAGE_REFRESH_MS) return
-    this.entries.set(account.dir, { status: 'loading', windows: [] })
+    // Keep showing the last reading while a refresh is in flight.
+    if (!previous) this.entries.set(account.dir, { status: 'loading', windows: [] })
     let entry: UsageEntry = { status: 'unavailable', windows: [], checkedAt: now }
     try {
       const accessToken = await token()
@@ -108,7 +111,7 @@ export function remaining(window: UsageWindow): number {
 export function usageStatus(entry: UsageEntry | undefined, now: number): { label: string; colour: string; exhausted?: true } {
   if (!entry || entry.status === 'loading') return { label: '· loading', colour: 'subtle' }
   if (entry.status === 'sign-in') return { label: '! sign in', colour: 'warning' }
-  if (entry.status !== 'ready' || entry.checkedAt === undefined || now - entry.checkedAt >= USAGE_REFRESH_MS || entry.windows.some(w => w.resetsAt && Date.parse(w.resetsAt) <= now)) {
+  if (entry.status !== 'ready' || entry.checkedAt === undefined || now - entry.checkedAt >= USAGE_STALE_MS || entry.windows.some(w => w.resetsAt && Date.parse(w.resetsAt) <= now)) {
     return { label: '? unknown', colour: 'subtle' }
   }
   if (entry.windows.some(w => w.used >= 100)) return { label: '◷ exhausted', colour: 'error', exhausted: true }

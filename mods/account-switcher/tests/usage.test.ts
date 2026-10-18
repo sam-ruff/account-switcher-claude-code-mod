@@ -21,7 +21,8 @@ test('usage status never calls unavailable or stale data available', () => {
   expect(usageStatus({ status: 'ready', windows: parseUsage(BODY), checkedAt: NOW }, NOW).label).toBe('! low budget')
   expect(usageStatus({ status: 'ready', windows: [{ label: '5h', used: 100 }], checkedAt: NOW }, NOW)).toEqual({ label: '◷ exhausted', colour: 'error', exhausted: true })
   expect(usageStatus({ status: 'ready', windows: parseUsage(BODY), checkedAt: NOW }, NOW).exhausted).toBeUndefined()
-  expect(usageStatus({ status: 'ready', windows: parseUsage(BODY), checkedAt: NOW - 15000 }, NOW).label).toBe('? unknown')
+  expect(usageStatus({ status: 'ready', windows: parseUsage(BODY), checkedAt: NOW - 15000 }, NOW).label).toBe('! low budget')
+  expect(usageStatus({ status: 'ready', windows: parseUsage(BODY), checkedAt: NOW - 30000 }, NOW).label).toBe('? unknown')
   expect(usageStatus({ status: 'ready', windows: parseUsage(BODY), checkedAt: NOW }, NOW + 86400000).label).toBe('? unknown')
   expect(usageStatus({ status: 'ready', windows: [{ label: '5h', used: 10 }], checkedAt: NOW }, NOW).label).toBe('? unknown')
 })
@@ -48,6 +49,43 @@ test('usage fetch is injected, cached per account and forced on refresh', async 
   await cache.refresh(ACCOUNT, async () => 'work-token', true)
   expect(tokens).toEqual(['work-token', 'personal-token', 'work-token'])
   expect(cache.entries.get(ACCOUNT.dir)?.status).toBe('ready')
+})
+
+test('a refresh keeps the last reading visible until the new one arrives', async () => {
+  let release = () => {}
+  let calls = 0
+  const cache = new UsageCache({
+    fetch: async () => {
+      if (calls++ > 0) await new Promise<void>(resolve => { release = resolve })
+      return { status: 200, body: BODY }
+    },
+  }, async () => NOW)
+  await cache.refresh(ACCOUNT, async () => 'token')
+  const before = cache.entries.get(ACCOUNT.dir)
+
+  const refreshing = cache.refresh(ACCOUNT, async () => 'token', true)
+  await new Promise(resolve => setTimeout(resolve, 0))
+  expect(cache.entries.get(ACCOUNT.dir)).toBe(before)
+
+  release()
+  await refreshing
+  expect(cache.entries.get(ACCOUNT.dir)?.status).toBe('ready')
+  expect(calls).toBe(2)
+})
+
+test('the first read shows a loading placeholder', async () => {
+  let release = () => {}
+  const cache = new UsageCache({
+    fetch: async () => {
+      await new Promise<void>(resolve => { release = resolve })
+      return { status: 200, body: BODY }
+    },
+  }, async () => NOW)
+  const reading = cache.refresh(ACCOUNT, async () => 'token')
+  await new Promise(resolve => setTimeout(resolve, 0))
+  expect(cache.entries.get(ACCOUNT.dir)?.status).toBe('loading')
+  release()
+  await reading
 })
 
 test('cached usage expires after fifteen seconds', async () => {
