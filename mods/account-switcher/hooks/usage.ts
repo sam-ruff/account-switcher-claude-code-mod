@@ -105,13 +105,13 @@ export function remaining(window: UsageWindow): number {
   return Math.max(0, Math.floor(100 - window.used))
 }
 
-export function usageStatus(entry: UsageEntry | undefined, now: number): { label: string; colour: string } {
+export function usageStatus(entry: UsageEntry | undefined, now: number): { label: string; colour: string; exhausted?: true } {
   if (!entry || entry.status === 'loading') return { label: '· loading', colour: 'subtle' }
   if (entry.status === 'sign-in') return { label: '! sign in', colour: 'warning' }
   if (entry.status !== 'ready' || entry.checkedAt === undefined || now - entry.checkedAt >= USAGE_REFRESH_MS || entry.windows.some(w => w.resetsAt && Date.parse(w.resetsAt) <= now)) {
     return { label: '? unknown', colour: 'subtle' }
   }
-  if (entry.windows.some(w => w.used >= 100)) return { label: '◷ exhausted', colour: 'error' }
+  if (entry.windows.some(w => w.used >= 100)) return { label: '◷ exhausted', colour: 'error', exhausted: true }
   if (!['5h', 'Week'].every(label => entry.windows.some(w => w.label === label))) return { label: '? unknown', colour: 'subtle' }
   if (entry.windows.some(w => remaining(w) < 30)) return { label: '! low budget', colour: 'warning' }
   return { label: '○ available', colour: 'success' }

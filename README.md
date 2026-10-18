@@ -53,7 +53,7 @@ Open the sidebar with Ctrl+Alt+Shift+numpad minus, with `/account-switch`, or by
 
 ![The compact ledger sidebar with a green active account, account dividers, remaining usage and a fixed footer](docs/sidebar.png)
 
-The green account row is the one this session uses. Every other session keeps its own. Keyboard focus adds a light background tint and a padded name highlight; moving focus does not switch accounts until you press Enter. Clawd and his hat sit beside the account name, with matching space above and below each row. There are 13 hats to choose from, and each account remembers its own.
+The green account row is the one this session uses. Every other session keeps its own, and new sessions start on whichever account you picked last. A row turns red when that account is out of credits, even if it is the active one. Keyboard focus adds a light background tint and a padded name highlight; moving focus does not switch accounts until you press Enter. Clawd and his hat sit beside the account name, with matching space above and below each row. There are 13 hats to choose from, and each account remembers its own.
 
 The compact ledger shows each account's remaining five-hour and weekly usage, with reset icons and local dates and times. Opening the panel reads usage using each account's own login, without switching the session. Usage refreshes every 15 seconds while the panel is open; closing it stops polling. Press `r` to request an immediate refresh. Missing or stale readings show as unknown. If the server rate-limits a refresh, automatic and manual refreshes both wait for its retry delay, with a minimum wait of 15 seconds. Expired logins need a switch to that account to refresh. Model-specific limits and extra usage are not included.
 
@@ -111,7 +111,7 @@ The numpad minus works in terminals that report modifier keys on it: kitty, WezT
 
 ## How it works
 
-Claude Code reads its login from the directory named by `CLAUDE_SECURESTORAGE_CONFIG_DIR`, or from `~/.claude` when that is unset. The mod gives each account a directory of its own under `~/.claude/accounts/` and points each session's variable at the account it should use. Token refreshes then land in that account's own copy, and a second session on another account never sees them. The login in `~/.claude` itself is the default account, which sessions start on and which `claude` without the mod keeps using.
+Claude Code reads its login from the directory named by `CLAUDE_SECURESTORAGE_CONFIG_DIR`, or from `~/.claude` when that is unset. The mod gives each account a directory of its own under `~/.claude/accounts/` and points each session's variable at the account it should use. Token refreshes then land in that account's own copy, and a second session on another account never sees them. The login in `~/.claude` itself is the default account, which `claude` without the mod keeps using. A new session starts on the last account chosen in any session, or on the default if that account has been forgotten or needs `/login`.
 
 On Linux and Windows each account's login is a `.credentials.json` in its directory, readable only by you, the same way Claude Code stores its own. On macOS, where Claude Code keeps logins in the Keychain, each account is a Keychain item named after its directory.
 

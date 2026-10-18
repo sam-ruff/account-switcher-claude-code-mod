@@ -19,7 +19,8 @@ test('usage parses percentages and formats the local reset date across daylight 
 test('usage status never calls unavailable or stale data available', () => {
   expect(usageStatus({ status: 'unavailable', windows: [] }, NOW).label).toBe('? unknown')
   expect(usageStatus({ status: 'ready', windows: parseUsage(BODY), checkedAt: NOW }, NOW).label).toBe('! low budget')
-  expect(usageStatus({ status: 'ready', windows: [{ label: '5h', used: 100 }], checkedAt: NOW }, NOW).label).toBe('◷ exhausted')
+  expect(usageStatus({ status: 'ready', windows: [{ label: '5h', used: 100 }], checkedAt: NOW }, NOW)).toEqual({ label: '◷ exhausted', colour: 'error', exhausted: true })
+  expect(usageStatus({ status: 'ready', windows: parseUsage(BODY), checkedAt: NOW }, NOW).exhausted).toBeUndefined()
   expect(usageStatus({ status: 'ready', windows: parseUsage(BODY), checkedAt: NOW - 15000 }, NOW).label).toBe('? unknown')
   expect(usageStatus({ status: 'ready', windows: parseUsage(BODY), checkedAt: NOW }, NOW + 86400000).label).toBe('? unknown')
   expect(usageStatus({ status: 'ready', windows: [{ label: '5h', used: 10 }], checkedAt: NOW }, NOW).label).toBe('? unknown')

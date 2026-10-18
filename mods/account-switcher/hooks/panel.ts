@@ -75,13 +75,20 @@ function usageRows({ Box, Text }: PanelElements, entry: UsageEntry | undefined, 
   return rows
 }
 
+/** Out of credits tints red, even on the active row, whose label still says it is active. */
+export function rowBackground(active: boolean, focused: boolean, exhausted: boolean): string | undefined {
+  if (exhausted) return focused ? 'rgb(74,40,43)' : 'rgb(52,30,33)'
+  if (active) return focused ? 'rgb(40,65,49)' : 'rgb(31,48,38)'
+  return focused ? 'rgb(53,53,57)' : undefined
+}
+
 function accountRow(el: PanelElements, state: PanelState, actions: PanelActions, account: Account, first: boolean): RenderElement {
   const { Box, Text, Button } = el
   const active = account.dir === state.current?.dir
   const focused = state.focused === useKey(account)
   const entry = account.needsLogin ? { status: 'sign-in' as const, windows: [] } : state.usage.get(account.dir)
   const status = usageStatus(entry, state.now)
-  const backgroundColor = active ? (focused ? 'rgb(40,65,49)' : 'rgb(31,48,38)') : focused ? 'rgb(53,53,57)' : undefined
+  const backgroundColor = rowBackground(active, focused, status.exhausted === true)
   const plan = account.plan ? account.plan.charAt(0).toUpperCase() + account.plan.slice(1) : ''
   return Box({ key: `row-${account.key}`, height: panelGeometry(state.width, state.height, state.accounts.length, 0).rowHeight - 1, backgroundColor, paddingX: 1, paddingY: 1, flexDirection: 'column', children: [
     Box({ flexDirection: 'column', flexGrow: 1, flexShrink: 1, children: [

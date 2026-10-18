@@ -1,5 +1,14 @@
 import { expect, test } from 'claude-code/testing'
-import { nextPanelFocus, panelGeometry } from '../hooks/panel.ts'
+import { nextPanelFocus, panelGeometry, rowBackground } from '../hooks/panel.ts'
+
+test('an account out of credits is tinted red, focused or not, active or not', () => {
+  expect(rowBackground(false, false, false)).toBeUndefined()
+  expect(rowBackground(true, false, false)).toBe('rgb(31,48,38)')
+  expect(rowBackground(false, false, true)).toBe('rgb(52,30,33)')
+  expect(rowBackground(true, false, true)).toBe('rgb(52,30,33)')
+  expect(rowBackground(false, true, true)).toBe('rgb(74,40,43)')
+  expect(rowBackground(true, true, true)).toBe('rgb(74,40,43)')
+})
 
 test('account scrolling reserves space for the fixed header and footer', () => {
   for (const width of [30, 52, 78]) {
