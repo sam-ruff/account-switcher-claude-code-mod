@@ -297,6 +297,52 @@ test('a resumed session goes back to the account it was using', async ($, on) =>
   expect(env.get('CLAUDE_SECURESTORAGE_CONFIG_DIR')).toBe(WORK)
 })
 
+test('switching remembers the account for new sessions', async ($, on) => {
+  const { store } = stub(on, machine())
+
+  await $.session.start(headless)
+  await $.command.run({ command: 'account-switch', args: 'work' })
+  expect(store.get('last-account')).toBe(WORK)
+
+  await $.command.run({ command: 'account-switch', args: '1' })
+  expect(store.get('last-account')).toBe(`${HOME}/.claude`)
+})
+
+test('a new session starts on the account last chosen in any session', async ($, on) => {
+  const store = new Map<string, unknown>([['last-account', WORK]])
+  const files = machine()
+  const { env } = stub(on, files, { store })
+
+  await $.session.start(headless)
+
+  expect(env.get('CLAUDE_SECURESTORAGE_CONFIG_DIR')).toBe(WORK)
+  expect(env.get('CLAUDE_CODE_ORGANIZATION_UUID')).toBe('org-a')
+  expect(store.get('sessions')).toEqual({ 'session-1': WORK })
+})
+
+test('a resumed session keeps its own account over the last chosen one', async ($, on) => {
+  const store = new Map<string, unknown>([
+    ['sessions', { 'session-1': `${HOME}/.claude` }],
+    ['last-account', WORK],
+  ])
+  const { env } = stub(on, machine(), { store })
+
+  await $.session.start(headless)
+
+  expect(env.has('CLAUDE_SECURESTORAGE_CONFIG_DIR')).toBe(false)
+  expect(store.get('last-account')).toBe(WORK)
+})
+
+test('a new session stays on the default when the last chosen account needs login', async ($, on) => {
+  const files = machine()
+  files.delete(`${WORK}/.credentials.json`)
+  const { env } = stub(on, files, { store: new Map([['last-account', WORK]]) })
+
+  await $.session.start(headless)
+
+  expect(env.has('CLAUDE_SECURESTORAGE_CONFIG_DIR')).toBe(false)
+})
+
 test('/status first points the shared account details at this session', async ($, on) => {
   const files = machine()
   const { clock } = stub(on, files, { env: { CLAUDE_SECURESTORAGE_CONFIG_DIR: WORK } })

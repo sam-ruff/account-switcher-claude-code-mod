@@ -9,6 +9,7 @@ import {
   hasSwitchBinding,
   matchAccount,
   resolvePaths,
+  startingAccount,
   SWITCH_ACTION,
   SWITCH_KEY,
   withoutSwitchBinding,
@@ -336,6 +337,24 @@ test('matchAccount by number, exact name, prefix, home, and ambiguity', async ()
   expect(matchAccount(accounts, 'sam').kind).toBe('ambiguous')
   expect(matchAccount(accounts, 'carol').kind).toBe('none')
   expect(matchAccount(accounts, '9').kind).toBe('none')
+})
+
+test('startingAccount prefers the resumed session, then the last signed-in choice', async () => {
+  const make = (name: string, needsLogin = false, isHome = false): Account => ({
+    key: name,
+    oauthAccount: { accountUuid: name },
+    dir: `/d/${name}`,
+    isHome,
+    needsLogin,
+  })
+  const accounts = [make('home', false, true), make('work'), make('expired', true)]
+
+  expect(startingAccount(accounts, '/d/home', '/d/work')).toBe(accounts[0])
+  expect(startingAccount(accounts, '/d/gone', '/d/work')).toBeUndefined()
+  expect(startingAccount(accounts, undefined, '/d/work')).toBe(accounts[1])
+  expect(startingAccount(accounts, undefined, '/d/expired')).toBeUndefined()
+  expect(startingAccount(accounts, undefined, '/d/gone')).toBeUndefined()
+  expect(startingAccount(accounts, undefined, undefined)).toBeUndefined()
 })
 
 test('the shortcut binding is added beside existing bindings and removed cleanly', async () => {

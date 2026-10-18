@@ -13,6 +13,7 @@ import {
   matchAccount,
   parseObject,
   resolvePaths,
+  startingAccount,
   SWITCH_ACTION,
   SWITCH_KEY_LABEL,
   withoutSwitchBinding,
@@ -31,6 +32,7 @@ const CONFIG_SETTLE_MS = 1500
 const SESSIONS_KEY = 'sessions'
 const KEYS_OFF_KEY = 'keys-off'
 const AUTO_SWITCH_KEY = 'auto-switch'
+const LAST_ACCOUNT_KEY = 'last-account'
 
 const HELP = [
   'Usage:',
@@ -201,8 +203,14 @@ async function refresh($: EngineInterface): Promise<AccountStore> {
   return s
 }
 
-/** Points this session's credential storage, and the shared account details, at `account`. */
+/** Switches this session to `account` and makes it the one new sessions start on. */
 async function useAccount($: EngineInterface, s: AccountStore, account: Account): Promise<void> {
+  await $.store.set(LAST_ACCOUNT_KEY, account.dir)
+  await applyAccount($, s, account)
+}
+
+/** Points this session's credential storage, and the shared account details, at `account`. */
+async function applyAccount($: EngineInterface, s: AccountStore, account: Account): Promise<void> {
   await s.shareFromHome(account)
   await $.env.set('CLAUDE_SECURESTORAGE_CONFIG_DIR', account.isHome ? undefined : account.dir)
   await $.env.set('CLAUDE_CODE_ORGANIZATION_UUID', account.oauthAccount.organizationUuid)
@@ -229,8 +237,9 @@ async function restoreSession($: EngineInterface, s: AccountStore): Promise<void
   if (await $.env.get('CLAUDE_SECURESTORAGE_CONFIG_DIR')) return
   const id = await $.session.id()
   const saved = ((await $.store.get(SESSIONS_KEY)) as Record<string, string> | undefined) ?? {}
-  const account = saved[id] ? (await s.list()).find(a => a.dir === saved[id]) : undefined
-  if (account && !account.isHome) await useAccount($, s, account)
+  const last = await $.store.get(LAST_ACCOUNT_KEY)
+  const account = startingAccount(await s.list(), saved[id], typeof last === 'string' ? last : undefined)
+  if (account && !account.isHome) await applyAccount($, s, account)
 }
 
 async function keybindingsPath($: EngineInterface, s: AccountStore): Promise<string> {

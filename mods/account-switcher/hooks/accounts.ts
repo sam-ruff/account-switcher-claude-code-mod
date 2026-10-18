@@ -174,6 +174,15 @@ export function matchAccount(accounts: Account[], query: string): Match {
   return { kind: 'none' }
 }
 
+/**
+ * The account a session starts on: the one it used before a resume, otherwise the
+ * last account chosen in any session, provided it is still signed in.
+ */
+export function startingAccount(accounts: Account[], sessionDir: string | undefined, lastDir: string | undefined): Account | undefined {
+  if (sessionDir) return accounts.find(a => a.dir === sessionDir)
+  return accounts.find(a => a.dir === lastDir && !a.needsLogin)
+}
+
 export function applyAccountConfig(config: Record<string, unknown>, oauth: OauthAccount): Record<string, unknown> {
   const next = { ...config }
   const current = config.oauthAccount as OauthAccount | undefined
