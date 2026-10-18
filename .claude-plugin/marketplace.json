@@ -13,7 +13,7 @@
       "source": "./mods/account-switcher",
       "description": "Mod: run each Claude Code session on its own Claude subscription account, and switch live from a sidebar (Ctrl+Alt+Shift+numpad -) or /account-switch",
       "category": "productivity",
-      "version": "1.0.0"
+      "version": "1.1.0"
     }
   ]
 }

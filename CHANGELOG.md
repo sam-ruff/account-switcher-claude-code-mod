@@ -1,3 +1,11 @@
+# [1.1.0](https://github.com/sam-ruff/account-switcher-claude-code-mod/compare/v1.0.0...v1.1.0) (2026-10-18)
+
+
+### Features
+
+* start new sessions on the last chosen account ([1d44c73](https://github.com/sam-ruff/account-switcher-claude-code-mod/commit/1d44c738887c211d873124009e56fddc222776e0))
+* tint accounts that are out of credits red ([2584309](https://github.com/sam-ruff/account-switcher-claude-code-mod/commit/25843098ef06028eb205c5d2116e31514e84a336))
+
 # 1.0.0 (2026-10-12)
 
 
